@@ -1,3 +1,8 @@
+import re
+from datetime import datetime
+
+import boto3
+from dotenv import load_dotenv
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
 import os, tempfile, requests
@@ -10,6 +15,7 @@ from app.utils import ocr, parser
 from pydantic import BaseModel, HttpUrl
 
 models.Base.metadata.create_all(bind=engine)
+load_dotenv()
 router = APIRouter()
 
 def get_db():
@@ -63,3 +69,52 @@ async def upload_s3_file(request: S3UploadRequest, db: Session = Depends(get_db)
         if os.path.exists(file_location):
             os.remove(file_location)
 
+
+
+s3_client = boto3.client(
+    "s3",
+    aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
+    aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
+    region_name=os.getenv("AWS_REGION"),
+)
+
+BUCKET_NAME = os.getenv("S3_BUCKET_NAME")
+
+class PresignedRequest(BaseModel):
+    filename: str
+    content_type: str
+
+class PresignedUrlResponse(BaseModel):
+    upload_url: str
+    file_url: str
+
+def sanitize_filename(filename: str) -> str:
+    # simple example: replace spaces and parentheses
+    return "".join(c for c in filename if c.isalnum() or c in ("-", "_", ".")) or "file"
+
+@router.post("/s3/presigned", response_model=PresignedUrlResponse)
+async def generate_presigned_url(req: PresignedRequest):
+    print("BUCKET_NAME:", os.getenv("S3_BUCKET_NAME"))
+    print("AWS_REGION:", os.getenv("AWS_REGION"))
+    print("Filename:", req.filename, "ContentType:", req.content_type)
+
+    try:
+        safe_filename = sanitize_filename(req.filename)
+        key = f"uploads/{datetime.utcnow().strftime('%Y%m%d%H%M%S')}_{safe_filename}"
+
+        content_type = str(req.content_type)
+
+        presigned = s3_client.generate_presigned_url(
+            "put_object",
+            Params={"Bucket": os.getenv('S3_BUCKET_NAME'), "Key": key, "ContentType": content_type},
+            ExpiresIn=3600,
+        )
+
+        print("Type of filename:", type(req.filename))
+        print("Type of content_type:", type(req.content_type))
+
+        file_url = f"https://{os.getenv('S3_BUCKET_NAME')}.s3.{os.getenv('AWS_REGION')}.amazonaws.com/{key}"
+        return PresignedUrlResponse(upload_url=presigned, file_url=file_url)
+    except Exception as e:
+        print("Error generating presigned URL:", e)
+        raise HTTPException(status_code=500, detail=str(e))
