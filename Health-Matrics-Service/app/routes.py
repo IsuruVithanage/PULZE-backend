@@ -1,15 +1,17 @@
-from fastapi import APIRouter, File, UploadFile, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
+import os, tempfile, requests
+from urllib.parse import urlparse
+
 from app import schemas, models
 from app.database import SessionLocal, engine
 from app.utils import ocr, parser
 
-# Ensure tables are created (or use Alembic)
-models.Base.metadata.create_all(bind=engine)
+from pydantic import BaseModel, HttpUrl
 
+models.Base.metadata.create_all(bind=engine)
 router = APIRouter()
 
-# Dependency to get a DB session
 def get_db():
     db = SessionLocal()
     try:
@@ -17,29 +19,42 @@ def get_db():
     finally:
         db.close()
 
+def download_file_from_url(url: str) -> str:
+    """Download file from a public S3 URL into a temp file and return path."""
+    parsed = urlparse(url)
+    if parsed.scheme not in ["http", "https"]:
+        raise ValueError("Only http/https URLs are allowed")
+
+    # Stream to temp file
+    with requests.get(url, stream=True, timeout=30) as r:
+        r.raise_for_status()
+        suffix = os.path.splitext(parsed.path)[1]  # preserve extension
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+        for chunk in r.iter_content(chunk_size=1024*1024):
+            if chunk:
+                tmp.write(chunk)
+        tmp.close()
+        return tmp.name
+
+class S3UploadRequest(BaseModel):
+    s3_url: HttpUrl
+
 @router.post("/upload", response_model=schemas.ReportResponse)
-async def upload_file(file: UploadFile = File(...), db: Session = Depends(get_db)):
-    # Save file to a temporary location
-    file_location = f"temp_{file.filename}"
-    with open(file_location, "wb") as f:
-        f.write(await file.read())
+async def upload_s3_file(request: S3UploadRequest, db: Session = Depends(get_db)):
+    try:
+        file_location = download_file_from_url(str(request.s3_url))  # ✅ cast to str
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Download failed: {e}")
 
     try:
         extracted_text = ocr.get_text_from_any_file(file_location)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        report_data = parser.parse_report(extracted_text)
+
+        new_report = models.Report(**report_data)
+        db.add(new_report)
+        db.commit()
+        db.refresh(new_report)
+        return new_report
     finally:
-        # Optionally delete the temporary file
-        import os
-        os.remove(file_location)
-
-    # Parse the extracted text
-    report_data = parser.parse_report(extracted_text)
-
-    # Create Report object and save to DB
-    new_report = models.Report(**report_data)
-    db.add(new_report)
-    db.commit()
-    db.refresh(new_report)
-
-    return new_report
+        if os.path.exists(file_location):
+            os.remove(file_location)

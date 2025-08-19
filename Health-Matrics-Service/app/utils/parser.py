@@ -1,7 +1,6 @@
 import re
 
 def parse_report(text: str) -> dict:
-    # Define regex patterns for each field (assumes consistent units and formats)
     patterns = {
         "total_cholesterol": r"TOTAL CHOLESTEROL\s+([\d.]+)",
         "hdl_cholesterol": r"HDL CHOLESTEROL\s+([\d.]+)",
@@ -19,6 +18,5 @@ def parse_report(text: str) -> dict:
         if match:
             data[key] = float(match.group(1))
         else:
-            # You may choose to raise an error or set a default value
             data[key] = 0.0
     return data

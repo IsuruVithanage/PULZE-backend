@@ -7,7 +7,8 @@ def convert_pdf_to_img(pdf_file: str):
     return convert_from_path(pdf_file)
 
 def convert_image_to_text(image_file):
-    return image_to_string(image_file)
+    custom_config = r'--oem 3 --psm 6'
+    return image_to_string(image_file, config=custom_config)
 
 def is_image(file_path: str) -> bool:
     image_extensions = ['.png', '.jpg', '.jpeg', '.bmp', '.tiff']
