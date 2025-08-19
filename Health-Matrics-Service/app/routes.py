@@ -81,6 +81,7 @@ s3_client = boto3.client(
 BUCKET_NAME = os.getenv("S3_BUCKET_NAME")
 
 class PresignedRequest(BaseModel):
+    user_id: int
     filename: str
     content_type: str
 
@@ -94,13 +95,10 @@ def sanitize_filename(filename: str) -> str:
 
 @router.post("/s3/presigned", response_model=PresignedUrlResponse)
 async def generate_presigned_url(req: PresignedRequest):
-    print("BUCKET_NAME:", os.getenv("S3_BUCKET_NAME"))
-    print("AWS_REGION:", os.getenv("AWS_REGION"))
-    print("Filename:", req.filename, "ContentType:", req.content_type)
 
     try:
         safe_filename = sanitize_filename(req.filename)
-        key = f"uploads/{datetime.utcnow().strftime('%Y%m%d%H%M%S')}_{safe_filename}"
+        key = f"uploads/{req.user_id}/{datetime.utcnow().strftime('%Y%m%d%H%M%S')}_{safe_filename}"
 
         content_type = str(req.content_type)
 
@@ -109,9 +107,6 @@ async def generate_presigned_url(req: PresignedRequest):
             Params={"Bucket": os.getenv('S3_BUCKET_NAME'), "Key": key, "ContentType": content_type},
             ExpiresIn=3600,
         )
-
-        print("Type of filename:", type(req.filename))
-        print("Type of content_type:", type(req.content_type))
 
         file_url = f"https://{os.getenv('S3_BUCKET_NAME')}.s3.{os.getenv('AWS_REGION')}.amazonaws.com/{key}"
         return PresignedUrlResponse(upload_url=presigned, file_url=file_url)
