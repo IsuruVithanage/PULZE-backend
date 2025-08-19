@@ -38,6 +38,7 @@ def download_file_from_url(url: str) -> str:
 
 class S3UploadRequest(BaseModel):
     s3_url: HttpUrl
+    user_id: int
 
 @router.post("/upload", response_model=schemas.ReportResponse)
 async def upload_s3_file(request: S3UploadRequest, db: Session = Depends(get_db)):
@@ -50,6 +51,9 @@ async def upload_s3_file(request: S3UploadRequest, db: Session = Depends(get_db)
         extracted_text = ocr.get_text_from_any_file(file_location)
         report_data = parser.parse_report(extracted_text)
 
+        # include user_id in the report
+        report_data["user_id"] = request.user_id
+
         new_report = models.Report(**report_data)
         db.add(new_report)
         db.commit()
@@ -58,3 +62,4 @@ async def upload_s3_file(request: S3UploadRequest, db: Session = Depends(get_db)
     finally:
         if os.path.exists(file_location):
             os.remove(file_location)
+

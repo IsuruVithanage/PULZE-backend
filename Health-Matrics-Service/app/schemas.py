@@ -1,4 +1,5 @@
 from pydantic import BaseModel
+from datetime import datetime
 
 class ReportBase(BaseModel):
     total_cholesterol: float
@@ -15,6 +16,8 @@ class ReportCreate(ReportBase):
 
 class ReportResponse(ReportBase):
     id: int
+    user_id: int
+    updated_at: datetime
 
     class Config:
         from_attributes = True

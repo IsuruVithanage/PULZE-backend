@@ -1,10 +1,12 @@
-from sqlalchemy import Column, Integer, Float, String
+from sqlalchemy import Column, Integer, Float, String, DateTime, func
 from .database import Base
 
 class Report(Base):
     __tablename__ = "reports"
 
     id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, index=True, nullable=False)
+
     total_cholesterol = Column(Float, nullable=False)
     hdl_cholesterol = Column(Float, nullable=False)
     triglycerides = Column(Float, nullable=False)
@@ -13,3 +15,5 @@ class Report(Base):
     non_hdl_cholesterol = Column(Float, nullable=False)
     total_hdl_ratio = Column(Float, nullable=False)
     triglycerides_hdl_ratio = Column(Float, nullable=False)
+
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
