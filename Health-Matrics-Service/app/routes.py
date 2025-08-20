@@ -1,5 +1,6 @@
 import re
 from datetime import datetime
+from typing import List
 
 import boto3
 from dotenv import load_dotenv
@@ -113,3 +114,44 @@ async def generate_presigned_url(req: PresignedRequest):
     except Exception as e:
         print("Error generating presigned URL:", e)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+class FileItem(BaseModel):
+    key: str
+    url: str
+    last_modified: datetime
+
+@router.get("/s3/files/{user_id}", response_model=List[FileItem])
+async def list_user_files(user_id: int):
+    try:
+        prefix = f"uploads/{user_id}/"
+        response = s3_client.list_objects_v2(
+            Bucket=BUCKET_NAME,
+            Prefix=prefix
+        )
+
+        if "Contents" not in response:
+            return []
+
+        files = []
+        for obj in response["Contents"]:
+            key = obj["Key"]
+
+            # Generate a presigned URL (GET) for viewing
+            url = s3_client.generate_presigned_url(
+                "get_object",
+                Params={"Bucket": BUCKET_NAME, "Key": key},
+                ExpiresIn=3600,  # 1 hour
+            )
+
+            files.append(
+                FileItem(
+                    key=key.split("/")[-1],  # only file name
+                    url=url,
+                    last_modified=obj["LastModified"],
+                )
+            )
+
+        return files
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to list files: {e}")
