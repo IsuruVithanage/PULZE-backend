@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 import os, tempfile, requests
 from urllib.parse import urlparse
 
-from app import schemas, models
+from app import schemas, models, database
 from app.database import SessionLocal, engine
 from app.utils import ocr, parser
 
@@ -155,3 +155,26 @@ async def list_user_files(user_id: int):
         return files
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to list files: {e}")
+
+
+
+@router.get("/users/{user_id}/latest-report")
+def get_latest_report(user_id: int, db: Session = Depends(get_db)):
+    report = (
+        db.query(models.Report)
+        .filter(models.Report.user_id == user_id)
+        .order_by(models.Report.updated_at.desc())
+        .first()
+    )
+    if not report:
+        raise HTTPException(status_code=404, detail="No report found")
+
+    # Convert to dict so frontend can iterate dynamically
+    return {
+        "total_cholesterol": report.total_cholesterol,
+        "hdl_cholesterol": report.hdl_cholesterol,
+        "triglycerides": report.triglycerides,
+        "ldl_cholesterol": report.ldl_cholesterol,
+        "triglycerides_hdl_ratio": report.triglycerides_hdl_ratio,
+        "updated_at": report.updated_at,
+    }
