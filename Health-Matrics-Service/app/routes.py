@@ -256,3 +256,57 @@ def get_metric_recommendation(
         print(f"An error occurred with the Groq API: {e}")
         raise HTTPException(status_code=500, detail="Failed to get recommendation from AI model.")
 
+
+
+@router.patch("/users/{user_id}/report/metric", response_model=schemas.ReportResponse)
+def update_health_metric(
+    user_id: int,
+    request: schemas.UpdateMetricRequest, # Use the Pydantic model for the request body
+    db: Session = Depends(get_db),
+):
+    """
+    Updates a single metric in the latest health report for a given user.
+    """
+    # 1. Find the user's most recent report
+    latest_report = (
+        db.query(models.Report)
+        .filter(models.Report.user_id == user_id)
+        .order_by(models.Report.updated_at.desc())
+        .first()
+    )
+
+    if not latest_report:
+        raise HTTPException(
+            status_code=404, detail=f"No report found for user_id {user_id}"
+        )
+
+    # 2. Validate that the metric_name is a valid and updatable field
+    #    This is a security and safety check to prevent updating arbitrary attributes.
+    allowed_metrics = {
+        "total_cholesterol", "hdl_cholesterol", "triglycerides",
+        "ldl_cholesterol", "vldl_cholesterol", "non_hdl_cholesterol",
+        "total_hdl_ratio", "triglycerides_hdl_ratio"
+    }
+    if request.metric_name not in allowed_metrics:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid metric name: '{request.metric_name}'. Please use one of {list(allowed_metrics)}."
+        )
+
+    # 3. Update the specific metric on the report object
+    #    setattr() is used to dynamically set an attribute based on a string name.
+    setattr(latest_report, request.metric_name, request.metric_value)
+
+    # Note: The `updated_at` field will be updated automatically by the database
+    # because of the `onupdate=func.now()` setting in your SQLAlchemy model.
+
+    # 4. Commit the changes to the database
+    try:
+        db.commit()
+        db.refresh(latest_report) # Refresh the object to get the latest data from the DB
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to update report: {e}")
+
+    # 5. Return the updated report
+    return latest_report

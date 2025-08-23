@@ -14,6 +14,10 @@ class ReportBase(BaseModel):
 class ReportCreate(ReportBase):
     pass
 
+class UpdateMetricRequest(BaseModel):
+    metric_name: str
+    metric_value: float
+
 class ReportResponse(ReportBase):
     id: int
     user_id: int
