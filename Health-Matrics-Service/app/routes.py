@@ -1,6 +1,7 @@
 import re
 from datetime import datetime
 from typing import List
+from groq import Groq
 
 import boto3
 from dotenv import load_dotenv
@@ -178,3 +179,80 @@ def get_latest_report(user_id: int, db: Session = Depends(get_db)):
         "triglycerides_hdl_ratio": report.triglycerides_hdl_ratio,
         "updated_at": report.updated_at,
     }
+
+try:
+    groq_client = Groq(
+        api_key=os.environ.get("GROQ_API_KEY"),
+    )
+except Exception as e:
+    # Handle cases where the API key might be missing
+    print(f"Error initializing Groq client: {e}")
+    groq_client = None
+
+@router.get("/metric/recommendation")
+def get_metric_recommendation(
+    metric_name: str,    # e.g., "BMI", "Blood Pressure", "Blood Sugar"
+    metric_value: float, # The actual value of the metric
+    gender: str,         # e.g., "Male", "Female"
+    age: int,            # User's age
+    weight_kg: float,    # User's weight in kilograms
+    height_cm: float     # User's height in centimeters
+):
+    """
+    Provides a brief, AI-generated insight into a user's health metric.
+    """
+    if not groq_client:
+        raise HTTPException(
+            status_code=500,
+            detail="Groq client is not initialized. Check API key."
+        )
+
+    # 1. Construct a detailed prompt for the language model.
+    # This prompt guides the AI to give the specific kind of response you want.
+    prompt = f"""
+    A user has provided the following health data:
+    - Gender: {gender}
+    - Age: {age}
+    - Weight: {weight_kg} kg
+    - Height: {height_cm} cm
+    - Health Metric: '{metric_name}'
+    - Metric Value: {metric_value}
+
+    Based on this data, act as a helpful health assistant and provide a brief, easy-to-understand insight into their '{metric_name}'.
+
+    Your response MUST follow these rules:
+    1.  Start by stating the user's current metric value and the category it falls into (e.g., "Overweight", "Normal", "High").
+    2.  Briefly explain what this means for their health in simple terms.
+    3.  Mention the generally accepted healthy range for this metric.
+    4.  Keep the entire response to a single, concise paragraph (about 2-4 sentences).
+    5.  Do NOT give medical advice. Focus on explaining the metric.
+    6.  Maintain a supportive and encouraging tone.
+
+    Here is an example for a BMI of 28:
+    "Your current BMI is 28, which falls in the Overweight range. This means your body weight is higher than what is considered healthy for your height. Maintaining a BMI between 18.5 and 24.9 is ideal and can reduce the risk of developing health issues."
+
+    Now, generate the insight for the user's data provided above.
+    """
+
+    try:
+        # 2. Call the Groq API with the constructed prompt
+        chat_completion = groq_client.chat.completions.create(
+            messages=[
+                {
+                    "role": "user",
+                    "content": prompt,
+                }
+            ],
+            # Using a powerful model like Llama 3 70b is great for this kind of nuanced task
+            model="llama3-70b-8192",
+        )
+
+        # 3. Extract and return the content of the response
+        recommendation = chat_completion.choices[0].message.content
+        return {"recommendation": recommendation.strip()}
+
+    except Exception as e:
+        # 4. Handle potential API errors gracefully
+        print(f"An error occurred with the Groq API: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get recommendation from AI model.")
+
