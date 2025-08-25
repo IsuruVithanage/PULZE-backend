@@ -6,10 +6,7 @@ from enum import Enum
 # --- ADD THIS ENUM ---
 class DocumentCategory(str, Enum):
     DIETARY = "dietary"
-    CARDIOVASCULAR = "cardiovascular"
-    DIABETES = "diabetes"
-    WEIGHT_MANAGEMENT = "weight_management"
-    AGE_SPECIFIC = "age_specific"
+    GENERAL = "general"
 # ---------------------
 
 
