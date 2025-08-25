@@ -1,6 +1,8 @@
 import re
 from datetime import datetime
 from typing import List
+
+from dateutil.relativedelta import relativedelta
 from groq import Groq
 
 import boto3
@@ -310,3 +312,68 @@ def update_health_metric(
 
     # 5. Return the updated report
     return latest_report
+
+
+@router.get("/users/{user_id}/reports/chart-data", response_model=schemas.ChartResponse)
+def get_user_report_chart_data(
+        user_id: int,
+        metric_name: str,  # The metric we want to plot, e.g., "total_cholesterol"
+        months: int = 6,  # Optional: how many months of history to show, defaults to 6
+        db: Session = Depends(get_db),
+):
+    """
+    Retrieves historical data for a specific metric for a given user,
+    formatted for use in chart libraries.
+    """
+    # 1. Validate that the requested metric is a valid field to prevent errors.
+    #    This should list all numeric fields from your Report model that can be charted.
+    allowed_metrics = {
+        "total_cholesterol", "hdl_cholesterol", "triglycerides",
+        "ldl_cholesterol", "vldl_cholesterol", "non_hdl_cholesterol",
+        "total_hdl_ratio", "triglycerides_hdl_ratio"
+    }
+    if metric_name not in allowed_metrics:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid metric name: '{metric_name}'. Charting not supported."
+        )
+
+    # 2. Calculate the start date for the query (e.g., 6 months ago from today)
+    start_date = datetime.now() - relativedelta(months=months)
+
+    # 3. Query the database for reports for the user within the time frame
+    historical_reports = (
+        db.query(models.Report)
+        .filter(models.Report.user_id == user_id, models.Report.updated_at >= start_date)
+        .order_by(models.Report.updated_at.asc())  # Order from oldest to newest
+        .all()
+    )
+
+    if not historical_reports:
+        # Return an empty chart structure if no data is found
+        return {"labels": [], "datasets": [{"data": []}]}
+
+    # 4. Process the reports to create labels and data points
+    labels = []
+    data_points = []
+    for report in historical_reports:
+        # Format the date into a user-friendly label (e.g., "Aug 24")
+        labels.append(report.updated_at.strftime("%b %d"))
+
+        # Dynamically get the value of the requested metric from the report object
+        value = getattr(report, metric_name, None)
+
+        # Add the value to our data points, using 0 if it's missing for some reason
+        data_points.append(value if value is not None else 0)
+
+    # 5. Construct the final response object matching the Pydantic schema
+    chart_response = {
+        "labels": labels,
+        "datasets": [
+            {
+                "data": data_points
+            }
+        ]
+    }
+
+    return chart_response

@@ -1,8 +1,20 @@
+# app/models/request_models.py
 from pydantic import BaseModel, Field, field_validator
 from typing import Optional
+from enum import Enum
+
+# --- ADD THIS ENUM ---
+class DocumentCategory(str, Enum):
+    DIETARY = "dietary"
+    CARDIOVASCULAR = "cardiovascular"
+    DIABETES = "diabetes"
+    WEIGHT_MANAGEMENT = "weight_management"
+    AGE_SPECIFIC = "age_specific"
+# ---------------------
 
 
 class HealthMetrics(BaseModel):
+    # ... your existing HealthMetrics class ...
     gender: str = Field(..., description="Gender of the patient (Male/Female)")
     age: int = Field(..., description="Age in years", ge=0, le=120)
     cholesterol: float = Field(..., description="Total cholesterol in mg/dL", ge=0)
@@ -18,11 +30,12 @@ class HealthMetrics(BaseModel):
             raise ValueError('Gender must be Male, Female, or Other')
         return v
 
-
 class RecommendationRequest(BaseModel):
+    # ... your existing RecommendationRequest class ...
     health_metrics: HealthMetrics
     additional_info: Optional[str] = Field(None, description="Any additional health information")
 
 
 class RecommendationResponse(BaseModel):
+    # ... your existing RecommendationResponse class ...
     recommendation: str = Field(..., description="Diet recommendation based on health metrics")

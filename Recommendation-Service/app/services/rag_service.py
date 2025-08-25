@@ -1,13 +1,12 @@
-from langchain_community.document_loaders import PyPDFLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.vectorstores import SKLearnVectorStore
-from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_ollama import ChatOllama
+from langchain.retrievers import MultiQueryRetriever
+from langchain_groq import ChatGroq
 from langchain.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
+from langchain_community.document_loaders import PyPDFLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
 from app.core.config import settings
-import os
-from typing import Dict, Any, Optional, List
+from app.services.vector_store import get_or_create_vector_store
+from typing import Dict, Any, List
 from langchain_core.documents import Document
 
 
@@ -24,132 +23,129 @@ class RAGService:
         if self._initialized:
             return
 
-        print("Initializing RAG Service...")
+        print("Initializing RAG Service with Pinecone and Groq...")
 
-        # Get the PDF path
-        pdf_path = settings.get_pdf_path()
-        self.is_pdf_loaded = False
-        self.doc_splits = []
+        # Initialize the LLM with Groq
+        self.llm = ChatGroq(
+            temperature=settings.TEMPERATURE,
+            groq_api_key=settings.GROQ_API_KEY,
+            model_name=settings.LLM_MODEL_NAME,
+        )
 
-        # Initialize components that don't depend on PDF
+        # Get the vector store from our dedicated service
+        self.vectorstore = get_or_create_vector_store()
+        base_retriever = self.vectorstore.as_retriever(search_kwargs={'k': settings.RETRIEVER_K})
+
+        # Initialize the Multi-Query Retriever
+        self.retriever = MultiQueryRetriever.from_llm(
+            retriever=base_retriever,
+            llm=self.llm
+        )
+
+        # Define the prompt template
+        # In RAGService.__init__
+
         # Define the prompt template
         self.prompt = PromptTemplate(
             template="""
-            Question: {question}
+            You are an expert nutritionist and health advisor, using guidelines from the Sri Lankan Ministry of Health.
+            Use the following context from your knowledge base to answer the user's question. The source of each context snippet is provided.
+            Provide a detailed, actionable, and personalized diet and lifestyle recommendation in a clear, easy-to-understand format.
 
-            Documents: {documents}
+            CONTEXT:
+            {documents}
 
-            Provide a detailed diet and lif style changes recommendation based on the health metrics above and the reference documents.
-            Focus on specific foods, meal timing, and nutritional guidelines that would help address the person's health concerns.
-            Include scientific rationale where appropriate.
+            USER'S HEALTH PROFILE:
+            {question}
 
-            Diet Recommendation:
+            Based on the user's health profile and the provided context, generate a comprehensive recommendation.
+            Focus on specific foods to eat and avoid, meal plans or examples, and scientific reasoning.
+            Wherever possible, mention the source of your information (e.g., "According to the Food Based Dietary Guidelines...").
+
+            IMPORTANT: Conclude your entire response with the following disclaimer, exactly as written:
+            'Disclaimer: This information is for educational purposes only and is not a substitute for professional medical advice. Always consult with a qualified healthcare provider for personalized health recommendations.'
+
+            RECOMMENDATION:
             """,
             input_variables=["question", "documents"],
         )
 
-        # Initialize the LLM
-        self.llm = ChatOllama(
-            model=settings.LLM_MODEL,
-            temperature=settings.TEMPERATURE,
+        # Create the RAG chain
+        self.rag_chain = self.prompt | self.llm | StrOutputParser()
+
+        # A simple chain for cases where retrieval might fail or isn't needed
+        self.simple_chain = (
+                PromptTemplate.from_template(
+                    """
+                    You are an expert nutritionist. Based on your general knowledge, provide a detailed diet and lifestyle recommendation for the following health profile: {question}.
+                    RECOMMENDATION:
+                    """
+                )
+                | self.llm
+                | StrOutputParser()
         )
-
-        # Create a simple chain for when no PDF is available
-        self.simple_chain = StrOutputParser() | self.llm | StrOutputParser()
-
-        # Try to load PDF if it exists
-        try:
-            if os.path.exists(pdf_path):
-                self._load_pdf(pdf_path)
-                self.is_pdf_loaded = True
-            else:
-                print(f"Warning: PDF file not found at {pdf_path}. Service will operate in fallback mode.")
-        except Exception as e:
-            print(f"Error loading PDF: {str(e)}. Service will operate in fallback mode.")
 
         self._initialized = True
         print("RAG Service initialized successfully!")
 
-    def _load_pdf(self, pdf_path: str):
-        """Load the PDF and initialize the vector store"""
-        # Load the PDF content
-        pdf_loader = PyPDFLoader(pdf_path)
-        docs = pdf_loader.load()
-
-        # Initialize a text splitter
-        text_splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(
-            chunk_size=settings.CHUNK_SIZE,
-            chunk_overlap=settings.CHUNK_OVERLAP
-        )
-
-        # Split the documents into chunks
-        self.doc_splits = text_splitter.split_documents(docs)
-
-        # Create embeddings and vector store
-        self.vectorstore = SKLearnVectorStore.from_documents(
-            documents=self.doc_splits,
-            embedding=HuggingFaceEmbeddings(),
-        )
-
-        self.retriever = self.vectorstore.as_retriever(k=settings.RETRIEVER_K)
-
-        # Create the RAG chain
-        self.rag_chain = self.prompt | self.llm | StrOutputParser()
-
-    def load_pdf_from_file(self, pdf_path: str) -> bool:
-        """Load a PDF file and initialize the vector store"""
+    def _load_and_split_pdf(self, pdf_path: str) -> List[Document]:
+        """Loads a PDF and splits it into manageable chunks."""
         try:
-            self._load_pdf(pdf_path)
-            self.is_pdf_loaded = True
-            return True
+            pdf_loader = PyPDFLoader(pdf_path)
+            docs = pdf_loader.load()
+
+            text_splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(
+                chunk_size=settings.CHUNK_SIZE,
+                chunk_overlap=settings.CHUNK_OVERLAP
+            )
+            return text_splitter.split_documents(docs)
         except Exception as e:
-            print(f"Error loading PDF: {str(e)}")
-            return False
+            print(f"Error loading or splitting PDF at {pdf_path}: {e}")
+            raise
+
+    async def add_pdf_to_index(self, pdf_path: str):
+        """Loads, splits, and indexes a PDF into Pinecone."""
+        print(f"Processing and indexing PDF: {pdf_path}")
+        doc_splits = self._load_and_split_pdf(pdf_path)
+
+        # Add documents to the Pinecone index.
+        # This will embed the documents and upload them.
+        await self.vectorstore.aadd_documents(doc_splits)
+        print(f"Successfully indexed {len(doc_splits)} document chunks from {pdf_path}")
 
     def format_metrics_to_question(self, metrics: Dict[str, Any], additional_info: str = None) -> str:
-        """Format the health metrics into a question for the LLM"""
-        question = f"My Gender: {metrics['gender']}, Age: {metrics['age']}, "
-        question += f"Chol: {metrics['cholesterol']} mg/dL, HDL: {metrics['hdl']} mg/dL, "
-        question += f"LDL: {metrics['ldl']} mg/dL, TG {metrics['triglycerides']} mg/dL, "
-        question += f"BMI: {metrics['bmi']}"
+        """Formats health metrics into a natural language query for the RAG system."""
+        question = (
+            f"Gender: {metrics['gender']}, Age: {metrics['age']}, "
+            f"Total Cholesterol: {metrics['cholesterol']} mg/dL, HDL: {metrics['hdl']} mg/dL, "
+            f"LDL: {metrics['ldl']} mg/dL, Triglycerides: {metrics['triglycerides']} mg/dL, "
+            f"BMI: {metrics['bmi']}"
+        )
 
         if additional_info:
             question += f". Additional information: {additional_info}"
 
-        question += ". Based on these health metrics, what diet should I follow?"
         return question
 
     async def get_recommendation(self, metrics: Dict[str, Any], additional_info: str = None) -> str:
-        """Get a diet recommendation based on health metrics"""
-        # Format metrics into a question
+        """Gets a diet recommendation using the RAG chain."""
         question = self.format_metrics_to_question(metrics, additional_info)
+        print(f"Formatted query for RAG: {question}")
 
-        if not self.is_pdf_loaded:
-            # Fallback mode: use the LLM directly with a more detailed prompt
-            detailed_prompt = f"""
-            You are a health and nutrition expert. A patient with the following metrics is asking for a diet recommendation:
+        try:
+            # Retrieve relevant documents from Pinecone
+            documents = await self.retriever.ainvoke(question)
 
-            {question}
+            if not documents:
+                print("Warning: No relevant documents found in Pinecone. Falling back to general knowledge.")
+                return await self.simple_chain.ainvoke({"question": question})
 
-            Provide a detailed diet recommendation focusing on:
-            1. Foods to include and avoid
-            2. Meal timing and frequency
-            3. Portion control
-            4. Scientific rationale
-            5. Potential health benefits
+            doc_texts = "\n---\n".join([doc.page_content for doc in documents])
 
-            Based on your expertise, what diet would you recommend?
-            """
-            return await self.simple_chain.ainvoke(detailed_prompt)
-
-        # PDF is loaded, use RAG approach
-        # Retrieve relevant documents
-        documents = self.retriever.invoke(question)
-
-        # Extract content from retrieved documents
-        doc_texts = "\n".join([doc.page_content for doc in documents])
-
-        # Get the answer from the language model
-        answer = self.rag_chain.invoke({"question": question, "documents": doc_texts})
-
-        return answer
+            # Invoke the RAG chain with the formatted question and retrieved documents
+            answer = await self.rag_chain.ainvoke({"question": question, "documents": doc_texts})
+            return answer
+        except Exception as e:
+            print(f"Error during RAG chain invocation: {e}")
+            # Fallback to the simple chain if RAG fails for any reason
+            return await self.simple_chain.ainvoke({"question": question})

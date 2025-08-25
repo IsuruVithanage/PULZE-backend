@@ -1,3 +1,5 @@
+from typing import List
+
 from pydantic import BaseModel
 from datetime import datetime
 
@@ -17,6 +19,13 @@ class ReportCreate(ReportBase):
 class UpdateMetricRequest(BaseModel):
     metric_name: str
     metric_value: float
+
+class ChartDataset(BaseModel):
+    data: List[float]
+
+class ChartResponse(BaseModel):
+    labels: List[str]
+    datasets: List[ChartDataset]
 
 class ReportResponse(ReportBase):
     id: int
