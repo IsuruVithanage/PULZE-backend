@@ -1,3 +1,5 @@
+import os
+
 from langchain.retrievers import MultiQueryRetriever
 from langchain_groq import ChatGroq
 from langchain.prompts import PromptTemplate
@@ -48,7 +50,7 @@ class RAGService:
         # Define the prompt template
         self.prompt = PromptTemplate(
             template="""
-            You are an expert nutritionist and health advisor, using guidelines from the Sri Lankan Ministry of Health.
+            You are an expert nutritionist and health advisor.
             Use the following context from your knowledge base to answer the user's question. The source of each context snippet is provided.
             Provide a detailed, actionable, and personalized diet and lifestyle recommendation in a clear, easy-to-understand format.
 
@@ -149,3 +151,51 @@ class RAGService:
             print(f"Error during RAG chain invocation: {e}")
             # Fallback to the simple chain if RAG fails for any reason
             return await self.simple_chain.ainvoke({"question": question})
+
+    async def reindex_all_sources(self) -> dict:
+        """
+        Discovers and indexes all PDF documents from the data/sources directory
+        and all of its subdirectories.
+
+        Returns:
+            A dictionary with the count of indexed files and chunks.
+        """
+        print("Starting full re-indexing process from all sources...")
+        source_directory = os.path.join(settings.PDF_DIRECTORY, "sources")
+
+        if not os.path.isdir(source_directory):
+            message = f"Error: Source directory not found at '{source_directory}'"
+            print(message)
+            raise FileNotFoundError(message)
+
+        indexed_files_count = 0
+        total_chunks_count = 0
+
+        # Walk through the sources directory and its subdirectories
+        for root, dirs, files in os.walk(source_directory):
+            for filename in files:
+                if filename.lower().endswith(".pdf"):
+                    file_path = os.path.join(root, filename)
+                    try:
+                        # Re-using the existing add_pdf_to_index logic
+                        # First, load and split to get the chunk count
+                        doc_splits = self._load_and_split_pdf(file_path)
+                        chunk_count = len(doc_splits)
+
+                        # Then, add to the vector store
+                        await self.vectorstore.aadd_documents(doc_splits)
+
+                        print(f"Successfully indexed {chunk_count} chunks from {file_path}")
+                        indexed_files_count += 1
+                        total_chunks_count += chunk_count
+
+                    except Exception as e:
+                        print(f"Failed to index {filename}. Error: {e}")
+
+        summary = {
+            "indexed_files": indexed_files_count,
+            "total_chunks_indexed": total_chunks_count,
+            "message": "Full re-indexing process completed."
+        }
+        print(summary)
+        return summary

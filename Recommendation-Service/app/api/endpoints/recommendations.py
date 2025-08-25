@@ -78,3 +78,20 @@ async def upload_document(
         if destination_path and os.path.exists(destination_path):
             os.remove(destination_path)
         raise HTTPException(status_code=500, detail=f"Failed to process and index document: {str(e)}")
+
+
+
+@router.post("/reindex-all", status_code=200)
+async def trigger_reindexing(rag_service: RAGService = Depends(get_rag_service)):
+    """
+    Triggers a full re-indexing of all documents in the 'data/sources' directory.
+    This will add all documents to the existing index.
+    NOTE: This does not clear the index first.
+    """
+    try:
+        summary = await rag_service.reindex_all_sources()
+        return summary
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"An error occurred during re-indexing: {str(e)}")
