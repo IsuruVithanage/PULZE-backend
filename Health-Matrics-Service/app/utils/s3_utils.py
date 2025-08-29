@@ -1,5 +1,4 @@
 import boto3
-import os
 import tempfile
 from urllib.parse import urlparse
 
@@ -11,8 +10,6 @@ def download_file_from_s3(s3_url: str) -> str:
     key = parsed_url.path.lstrip("/")
 
     s3 = boto3.client("s3")
-
-    # Save to a temporary file
     temp_file = tempfile.NamedTemporaryFile(delete=False)
     s3.download_file(bucket, key, temp_file.name)
 

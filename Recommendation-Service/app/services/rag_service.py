@@ -148,14 +148,37 @@ class RAGService:
         await self.vectorstore.aadd_documents(doc_splits)
         print(f"Successfully indexed {len(doc_splits)} document chunks from {pdf_path}")
 
+    # In app/services/rag_service.py within the RAGService class
+
     def format_metrics_to_question(self, metrics: Dict[str, Any], additional_info: str = None) -> str:
         """Formats health metrics into a natural language query for the RAG system."""
-        question = (
-            f"Gender: {metrics['gender']}, Age: {metrics['age']}, "
-            f"Total Cholesterol: {metrics['cholesterol']} mg/dL, HDL: {metrics['hdl']} mg/dL, "
-            f"LDL: {metrics['ldl']} mg/dL, Triglycerides: {metrics['triglycerides']} mg/dL, "
-            f"BMI: {metrics['bmi']}"
-        )
+
+        # Use .get() for safety in case a key is missing from the input
+        gender = metrics.get('gender', 'Not provided')
+        age = metrics.get('age', 'Not provided')
+        bmi = metrics.get('bmi', 'Not provided')
+        cholesterol = metrics.get('cholesterol', 'Not provided')
+        hdl = metrics.get('hdl', 'Not provided')
+        ldl = metrics.get('ldl', 'Not provided')
+        triglycerides = metrics.get('triglycerides', 'Not provided')
+
+        # --- ADD THE NEW METRIC HERE ---
+        fasting_blood_sugar = metrics.get('fasting_blood_sugar', 'Not provided')
+
+        # Construct the question string, including the new metric
+        question_parts = [
+            f"Gender: {gender}",
+            f"Age: {age}",
+            f"BMI: {bmi}",
+            f"Total Cholesterol: {cholesterol} mg/dL",
+            f"HDL: {hdl} mg/dL",
+            f"LDL: {ldl} mg/dL",
+            f"Triglycerides: {triglycerides} mg/dL",
+            f"Fasting Blood Sugar: {fasting_blood_sugar} mg/dL"  # <-- New part added
+        ]
+
+        # Filter out any parts where the data was not provided
+        question = ", ".join(part for part in question_parts if "Not provided" not in part)
 
         if additional_info:
             question += f". Additional information: {additional_info}"

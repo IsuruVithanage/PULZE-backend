@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from datetime import datetime
 from enum import Enum
 
-# --- NEW: Enum for Report Type selection in the API ---
+# --- Enum for Report Type selection in the API ---
 class ReportType(str, Enum):
     LIPID = "lipid"
     BLOOD_SUGAR = "blood_sugar"
@@ -59,3 +59,15 @@ class ChartDataset(BaseModel):
 class ChartResponse(BaseModel):
     labels: List[str]
     datasets: List[ChartDataset]
+
+
+class CombinedReportResponse(BaseModel):
+    total_cholesterol: Optional[float] = None
+    hdl_cholesterol: Optional[float] = None
+    triglycerides: Optional[float] = None
+    ldl_cholesterol: Optional[float] = None
+    triglycerides_hdl_ratio: Optional[float] = None
+    fasting_blood_sugar: Optional[float] = None
+    random_blood_sugar: Optional[float] = None
+    hba1c: Optional[float] = None
+    last_updated: Optional[datetime] = None

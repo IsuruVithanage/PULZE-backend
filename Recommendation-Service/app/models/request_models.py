@@ -11,14 +11,18 @@ class DocumentCategory(str, Enum):
 
 
 class HealthMetrics(BaseModel):
-    # ... your existing HealthMetrics class ...
     gender: str = Field(..., description="Gender of the patient (Male/Female)")
     age: int = Field(..., description="Age in years", ge=0, le=120)
-    cholesterol: float = Field(..., description="Total cholesterol in mg/dL", ge=0)
-    hdl: float = Field(..., description="HDL cholesterol in mg/dL", ge=0)
-    ldl: float = Field(..., description="LDL cholesterol in mg/dL", ge=0)
-    triglycerides: float = Field(..., description="Triglycerides in mg/dL", ge=0)
     bmi: float = Field(..., description="Body Mass Index", ge=0)
+
+    # Lipid Profile Metrics (Optional)
+    cholesterol: Optional[float] = Field(None, description="Total cholesterol in mg/dL", ge=0)
+    hdl: Optional[float] = Field(None, description="HDL cholesterol in mg/dL", ge=0)
+    ldl: Optional[float] = Field(None, description="LDL cholesterol in mg/dL", ge=0)
+    triglycerides: Optional[float] = Field(None, description="Triglycerides in mg/dL", ge=0)
+
+    # --- NEW: Blood Sugar Metric (Optional) ---
+    fasting_blood_sugar: Optional[float] = Field(None, description="Fasting blood sugar in mg/dL", ge=0)
 
     @field_validator('gender')
     def gender_must_be_valid(cls, v):

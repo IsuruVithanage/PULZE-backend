@@ -2,14 +2,11 @@
 from sqlalchemy import Column, Integer, Float, DateTime, func, ForeignKey
 from .database import Base
 
-# Best practice to keep User model separate, but for simplicity we can define it here
-# Or assume it exists elsewhere. We will link reports to a user_id.
-
 class LipidReport(Base):
     __tablename__ = "lipid_reports"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, index=True, nullable=False) # In a full app: Column(Integer, ForeignKey("users.id"))
+    user_id = Column(Integer, index=True, nullable=False)
 
     total_cholesterol = Column(Float, nullable=False)
     hdl_cholesterol = Column(Float, nullable=False)
@@ -26,7 +23,7 @@ class BloodSugarReport(Base):
     __tablename__ = "blood_sugar_reports"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, index=True, nullable=False) # Foreign key to user
+    user_id = Column(Integer, index=True, nullable=False)
 
     fasting_blood_sugar = Column(Float, nullable=True)
     random_blood_sugar = Column(Float, nullable=True)

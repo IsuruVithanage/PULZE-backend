@@ -1,4 +1,3 @@
-import re
 from datetime import datetime
 from typing import List
 
@@ -12,8 +11,9 @@ from sqlalchemy.orm import Session
 import os, tempfile, requests
 from urllib.parse import urlparse
 
-from app import schemas, models, database
+from app import schemas, models
 from app.database import SessionLocal, engine
+from app.schemas import CombinedReportResponse
 from app.utils import ocr, parser
 
 from pydantic import BaseModel, HttpUrl
@@ -59,7 +59,6 @@ async def upload_s3_file_v2(request: S3UploadRequest, db: Session = Depends(get_
         file_location = download_file_from_url(str(request.s3_url))
         extracted_text = ocr.get_text_from_any_file(file_location)
 
-        # --- NEW LOGIC: Route to the correct parser based on report_type ---
         if request.report_type == schemas.ReportType.LIPID:
             report_data = parser.parse_lipid_report(extracted_text)
             new_report = models.LipidReport(user_id=request.user_id, **report_data)
@@ -102,7 +101,6 @@ class PresignedUrlResponse(BaseModel):
     file_url: str
 
 def sanitize_filename(filename: str) -> str:
-    # simple example: replace spaces and parentheses
     return "".join(c for c in filename if c.isalnum() or c in ("-", "_", ".")) or "file"
 
 @router.post("/s3/presigned", response_model=PresignedUrlResponse)
@@ -147,8 +145,6 @@ async def list_user_files(user_id: int):
         files = []
         for obj in response["Contents"]:
             key = obj["Key"]
-
-            # Generate a presigned URL (GET) for viewing
             url = s3_client.generate_presigned_url(
                 "get_object",
                 Params={"Bucket": BUCKET_NAME, "Key": key},
@@ -157,7 +153,7 @@ async def list_user_files(user_id: int):
 
             files.append(
                 FileItem(
-                    key=key.split("/")[-1],  # only file name
+                    key=key.split("/")[-1],
                     url=url,
                     last_modified=obj["LastModified"],
                 )
@@ -168,48 +164,93 @@ async def list_user_files(user_id: int):
         raise HTTPException(status_code=500, detail=f"Failed to list files: {e}")
 
 
-
-@router.get("/users/{user_id}/latest-report")
-def get_latest_report(user_id: int, db: Session = Depends(get_db)):
-    report = (
-        db.query(models.Report)
-        .filter(models.Report.user_id == user_id)
-        .order_by(models.Report.updated_at.desc())
+@router.get("/users/{user_id}/latest-report", response_model=CombinedReportResponse)
+def get_latest_combined_report(user_id: int, db: Session = Depends(get_db)):
+    """
+    Fetches the latest lipid and blood sugar reports for a user and
+    combines them into a single response.
+    """
+    # 1. Fetch the latest lipid report
+    latest_lipid_report = (
+        db.query(models.LipidReport)
+        .filter(models.LipidReport.user_id == user_id)
+        .order_by(models.LipidReport.updated_at.desc())
         .first()
     )
-    if not report:
-        raise HTTPException(status_code=404, detail="No report found")
 
-    # Convert to dict so frontend can iterate dynamically
-    return {
-        "total_cholesterol": report.total_cholesterol,
-        "hdl_cholesterol": report.hdl_cholesterol,
-        "triglycerides": report.triglycerides,
-        "ldl_cholesterol": report.ldl_cholesterol,
-        "triglycerides_hdl_ratio": report.triglycerides_hdl_ratio,
-        "updated_at": report.updated_at,
-    }
+    # 2. Fetch the latest blood sugar report
+    latest_blood_sugar_report = (
+        db.query(models.BloodSugarReport)
+        .filter(models.BloodSugarReport.user_id == user_id)
+        .order_by(models.BloodSugarReport.updated_at.desc())
+        .first()
+    )
+
+    # 3. Check if any reports were found at all
+    if not latest_lipid_report and not latest_blood_sugar_report:
+        raise HTTPException(status_code=404, detail=f"No reports found for user {user_id}")
+
+    # 4. Build the combined response dictionary
+    combined_data = {}
+    last_updated_time = None
+
+    if latest_lipid_report:
+        combined_data.update({
+            "total_cholesterol": latest_lipid_report.total_cholesterol,
+            "hdl_cholesterol": latest_lipid_report.hdl_cholesterol,
+            "triglycerides": latest_lipid_report.triglycerides,
+            "ldl_cholesterol": latest_lipid_report.ldl_cholesterol,
+            "triglycerides_hdl_ratio": latest_lipid_report.triglycerides_hdl_ratio,
+        })
+        last_updated_time = latest_lipid_report.updated_at
+
+    if latest_blood_sugar_report:
+        combined_data.update({
+            "fasting_blood_sugar": latest_blood_sugar_report.fasting_blood_sugar,
+            "random_blood_sugar": latest_blood_sugar_report.random_blood_sugar,
+            "hba1c": latest_blood_sugar_report.hba1c,
+        })
+        # Determine which report is more recent for the 'last_updated' field
+        if last_updated_time is None or latest_blood_sugar_report.updated_at > last_updated_time:
+            last_updated_time = latest_blood_sugar_report.updated_at
+
+    combined_data["last_updated"] = last_updated_time
+
+    return combined_data
 
 try:
     groq_client = Groq(
         api_key=os.environ.get("GROQ_API_KEY"),
     )
 except Exception as e:
-    # Handle cases where the API key might be missing
     print(f"Error initializing Groq client: {e}")
     groq_client = None
 
+# app/routes.py
+
+# ... (ensure all necessary imports are present)
+from app import schemas, models, database
+from sqlalchemy.orm import Session
+from fastapi import Depends, HTTPException
+
+
+# ... (your other routes) ...
+
+# --- THIS IS THE UPDATED FUNCTION ---
 @router.get("/metric/recommendation")
 def get_metric_recommendation(
-    metric_name: str,    # e.g., "BMI", "Blood Pressure", "Blood Sugar"
-    metric_value: float, # The actual value of the metric
-    gender: str,         # e.g., "Male", "Female"
-    age: int,            # User's age
-    weight_kg: float,    # User's weight in kilograms
-    height_cm: float     # User's height in centimeters
+        metric_name: str,
+        metric_value: float,
+        gender: str,
+        age: int,
+        weight_kg: float,
+        height_cm: float,
+        user_id: int,  # <-- NEW: Need user_id to query the database
+        db: Session = Depends(get_db)  # <-- NEW: Add database dependency
 ):
     """
-    Provides a brief, AI-generated insight into a user's health metric.
+    Provides a brief, AI-generated insight into a user's health metric,
+    comparing it with the previous value if available.
     """
     if not groq_client:
         raise HTTPException(
@@ -217,8 +258,51 @@ def get_metric_recommendation(
             detail="Groq client is not initialized. Check API key."
         )
 
-    # 1. Construct a detailed prompt for the language model.
-    # This prompt guides the AI to give the specific kind of response you want.
+    # --- NEW LOGIC: Find the previous metric value ---
+    previous_value_text = ""
+    previous_report = None
+
+    # Determine which table to query based on the metric name
+    lipid_metrics = {"Total Cholesterol", "HDL Cholesterol", "LDL Cholesterol", "Triglycerides"}
+    sugar_metrics = {"Fasting Blood Sugar", "Random Blood Sugar", "HbA1c"}
+
+    model_to_query = None
+    api_metric_name = None
+
+    # A simple mapping from display name to database field name
+    metric_map = {
+        "Total Cholesterol": "total_cholesterol", "HDL Cholesterol": "hdl_cholesterol",
+        "LDL Cholesterol": "ldl_cholesterol", "Triglycerides": "triglycerides",
+        "Fasting Blood Sugar": "fasting_blood_sugar", "Random Blood Sugar": "random_blood_sugar",
+        "HbA1c": "hba1c"
+    }
+
+    api_metric_name = metric_map.get(metric_name)
+
+    if metric_name in lipid_metrics:
+        model_to_query = models.LipidReport
+    elif metric_name in sugar_metrics:
+        model_to_query = models.BloodSugarReport
+
+    if model_to_query and api_metric_name:
+        # Query for the second to last report (the one before the latest)
+        # We use offset(1) to skip the most recent record and get the one before it.
+        previous_report = (
+            db.query(model_to_query)
+            .filter(model_to_query.user_id == user_id)
+            .order_by(model_to_query.updated_at.desc())
+            .offset(1)
+            .first()
+        )
+
+    if previous_report:
+        previous_value = getattr(previous_report, api_metric_name, None)
+        if previous_value is not None:
+            previous_date = previous_report.updated_at.strftime("%B %d, %Y")
+            # Create a sentence to add to the prompt
+            previous_value_text = f"For comparison, their previous value on {previous_date} was {previous_value}."
+
+    # --- DYNAMIC PROMPT CONSTRUCTION ---
     prompt = f"""
     A user has provided the following health data:
     - Gender: {gender}
@@ -227,6 +311,7 @@ def get_metric_recommendation(
     - Height: {height_cm} cm
     - Health Metric: '{metric_name}'
     - Metric Value: {metric_value}
+    {'- Previous Metric Value: ' + previous_value_text if previous_value_text else ''}
 
     Based on this data, act as a helpful health assistant and provide a brief, easy-to-understand insight into their '{metric_name}'.
 
@@ -234,35 +319,28 @@ def get_metric_recommendation(
     1.  Start by stating the user's current metric value and the category it falls into (e.g., "Overweight", "Normal", "High").
     2.  Briefly explain what this means for their health in simple terms.
     3.  Mention the generally accepted healthy range for this metric.
-    4.  Keep the entire response to a single, concise paragraph (about 2-4 sentences).
-    5.  Do NOT give medical advice. Focus on explaining the metric.
-    6.  Maintain a supportive and encouraging tone.
+    4.  **If a previous value is provided, briefly compare the current value to the previous one (e.g., "This is an improvement from your previous value of X..." or "This is higher than your previous reading of Y...").**
+    5.  Keep the entire response to a single, concise paragraph (about 3-5 sentences).
+    6.  Do NOT give medical advice. Focus on explaining the metric.
+    7.  Maintain a supportive and encouraging tone.
 
     Here is an example for a BMI of 28:
     "Your current BMI is 28, which falls in the Overweight range. This means your body weight is higher than what is considered healthy for your height. Maintaining a BMI between 18.5 and 24.9 is ideal and can reduce the risk of developing health issues."
+
+    Here is an example with a previous value:
+    "Your current Total Cholesterol is 195, which is in the healthy Normal range. This is a great improvement from your previous reading of 210 on June 15, 2025. Keeping your cholesterol below 200 is excellent for long-term heart health."
 
     Now, generate the insight for the user's data provided above.
     """
 
     try:
-        # 2. Call the Groq API with the constructed prompt
         chat_completion = groq_client.chat.completions.create(
-            messages=[
-                {
-                    "role": "user",
-                    "content": prompt,
-                }
-            ],
-            # Using a powerful model like Llama 3 70b is great for this kind of nuanced task
+            messages=[{"role": "user", "content": prompt}],
             model="llama3-70b-8192",
         )
-
-        # 3. Extract and return the content of the response
         recommendation = chat_completion.choices[0].message.content
         return {"recommendation": recommendation.strip()}
-
     except Exception as e:
-        # 4. Handle potential API errors gracefully
         print(f"An error occurred with the Groq API: {e}")
         raise HTTPException(status_code=500, detail="Failed to get recommendation from AI model.")
 
@@ -271,13 +349,12 @@ def get_metric_recommendation(
 @router.patch("/users/{user_id}/report/metric", response_model=schemas.LipidReportResponse)
 def update_health_metric(
     user_id: int,
-    request: schemas.UpdateMetricRequest, # Use the Pydantic model for the request body
+    request: schemas.UpdateMetricRequest,
     db: Session = Depends(get_db),
 ):
     """
     Updates a single metric in the latest health report for a given user.
     """
-    # 1. Find the user's most recent report
     latest_report = (
         db.query(models.Report)
         .filter(models.Report.user_id == user_id)
@@ -290,8 +367,6 @@ def update_health_metric(
             status_code=404, detail=f"No report found for user_id {user_id}"
         )
 
-    # 2. Validate that the metric_name is a valid and updatable field
-    #    This is a security and safety check to prevent updating arbitrary attributes.
     allowed_metrics = {
         "total_cholesterol", "hdl_cholesterol", "triglycerides",
         "ldl_cholesterol", "vldl_cholesterol", "non_hdl_cholesterol",
@@ -303,78 +378,75 @@ def update_health_metric(
             detail=f"Invalid metric name: '{request.metric_name}'. Please use one of {list(allowed_metrics)}."
         )
 
-    # 3. Update the specific metric on the report object
-    #    setattr() is used to dynamically set an attribute based on a string name.
     setattr(latest_report, request.metric_name, request.metric_value)
 
-    # Note: The `updated_at` field will be updated automatically by the database
-    # because of the `onupdate=func.now()` setting in your SQLAlchemy model.
-
-    # 4. Commit the changes to the database
     try:
         db.commit()
-        db.refresh(latest_report) # Refresh the object to get the latest data from the DB
+        db.refresh(latest_report)
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Failed to update report: {e}")
 
-    # 5. Return the updated report
     return latest_report
 
 
 @router.get("/users/{user_id}/reports/chart-data", response_model=schemas.ChartResponse)
 def get_user_report_chart_data(
         user_id: int,
-        metric_name: str,  # The metric we want to plot, e.g., "total_cholesterol"
-        months: int = 6,  # Optional: how many months of history to show, defaults to 6
+        report_type: schemas.ReportType,  # <-- NEW: Add parameter to specify report type
+        metric_name: str,
+        months: int = 6,
         db: Session = Depends(get_db),
 ):
     """
     Retrieves historical data for a specific metric for a given user,
-    formatted for use in chart libraries.
+    formatted for use in chart libraries. The report_type determines which table to query.
     """
-    # 1. Validate that the requested metric is a valid field to prevent errors.
-    #    This should list all numeric fields from your Report model that can be charted.
-    allowed_metrics = {
-        "total_cholesterol", "hdl_cholesterol", "triglycerides",
-        "ldl_cholesterol", "vldl_cholesterol", "non_hdl_cholesterol",
-        "total_hdl_ratio", "triglycerides_hdl_ratio"
-    }
+
+    # --- NEW: Logic to select the correct model and allowed metrics ---
+    model_to_query = None
+    allowed_metrics = set()
+
+    if report_type == schemas.ReportType.LIPID:
+        model_to_query = models.LipidReport
+        allowed_metrics = {
+            "total_cholesterol", "hdl_cholesterol", "triglycerides",
+            "ldl_cholesterol", "vldl_cholesterol", "non_hdl_cholesterol",
+            "total_hdl_ratio", "triglycerides_hdl_ratio"
+        }
+    elif report_type == schemas.ReportType.BLOOD_SUGAR:
+        model_to_query = models.BloodSugarReport
+        allowed_metrics = {
+            "fasting_blood_sugar", "random_blood_sugar", "hba1c"
+        }
+
     if metric_name not in allowed_metrics:
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid metric name: '{metric_name}'. Charting not supported."
+            detail=f"Invalid metric name '{metric_name}' for report type '{report_type}'. Charting not supported."
         )
 
-    # 2. Calculate the start date for the query (e.g., 6 months ago from today)
     start_date = datetime.now() - relativedelta(months=months)
 
-    # 3. Query the database for reports for the user within the time frame
+    # --- UPDATED: Query the correct model ---
     historical_reports = (
-        db.query(models.Report)
-        .filter(models.Report.user_id == user_id, models.Report.updated_at >= start_date)
-        .order_by(models.Report.updated_at.asc())  # Order from oldest to newest
+        db.query(model_to_query)
+        .filter(model_to_query.user_id == user_id, model_to_query.updated_at >= start_date)
+        .order_by(model_to_query.updated_at.asc())
         .all()
     )
 
     if not historical_reports:
-        # Return an empty chart structure if no data is found
         return {"labels": [], "datasets": [{"data": []}]}
 
-    # 4. Process the reports to create labels and data points
     labels = []
     data_points = []
     for report in historical_reports:
-        # Format the date into a user-friendly label (e.g., "Aug 24")
         labels.append(report.updated_at.strftime("%b %d"))
-
-        # Dynamically get the value of the requested metric from the report object
         value = getattr(report, metric_name, None)
+        # Return null for missing data points, which chart libraries handle better than 0
+        data_points.append(value)
 
-        # Add the value to our data points, using 0 if it's missing for some reason
-        data_points.append(value if value is not None else 0)
-
-    # 5. Construct the final response object matching the Pydantic schema
     chart_response = {
         "labels": labels,
         "datasets": [
