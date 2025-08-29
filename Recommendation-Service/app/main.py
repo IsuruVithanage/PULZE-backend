@@ -34,5 +34,5 @@ async def root():
     return {"message": f"Welcome to the {settings.PROJECT_NAME}"}
 
 # This part is for direct execution, uvicorn will handle it when run from the terminal
-# if __name__ == "__main__":
-#     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True, app_dir="app")
+if __name__ == "__main__":
+     uvicorn.run("main:app", host="0.0.0.0", port=8081, reload=True, app_dir="app")

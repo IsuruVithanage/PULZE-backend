@@ -49,30 +49,38 @@ def download_file_from_url(url: str) -> str:
 class S3UploadRequest(BaseModel):
     s3_url: HttpUrl
     user_id: int
+    report_type: schemas.ReportType
 
-@router.post("/upload", response_model=schemas.ReportResponse)
-async def upload_s3_file(request: S3UploadRequest, db: Session = Depends(get_db)):
-    try:
-        file_location = download_file_from_url(str(request.s3_url))  # ✅ cast to str
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Download failed: {e}")
 
+@router.post("/upload", status_code=201)
+async def upload_s3_file_v2(request: S3UploadRequest, db: Session = Depends(get_db)):
+    file_location = None
     try:
+        file_location = download_file_from_url(str(request.s3_url))
         extracted_text = ocr.get_text_from_any_file(file_location)
-        report_data = parser.parse_report(extracted_text)
 
-        # include user_id in the report
-        report_data["user_id"] = request.user_id
+        # --- NEW LOGIC: Route to the correct parser based on report_type ---
+        if request.report_type == schemas.ReportType.LIPID:
+            report_data = parser.parse_lipid_report(extracted_text)
+            new_report = models.LipidReport(user_id=request.user_id, **report_data)
+        elif request.report_type == schemas.ReportType.BLOOD_SUGAR:
+            report_data = parser.parse_blood_sugar_report(extracted_text)
+            new_report = models.BloodSugarReport(user_id=request.user_id, **report_data)
+        else:
+            raise HTTPException(status_code=400, detail="Invalid report type specified.")
 
-        new_report = models.Report(**report_data)
         db.add(new_report)
         db.commit()
         db.refresh(new_report)
         return new_report
-    finally:
-        if os.path.exists(file_location):
-            os.remove(file_location)
 
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Parsing failed: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {e}")
+    finally:
+        if file_location and os.path.exists(file_location):
+            os.remove(file_location)
 
 
 s3_client = boto3.client(
@@ -260,7 +268,7 @@ def get_metric_recommendation(
 
 
 
-@router.patch("/users/{user_id}/report/metric", response_model=schemas.ReportResponse)
+@router.patch("/users/{user_id}/report/metric", response_model=schemas.LipidReportResponse)
 def update_health_metric(
     user_id: int,
     request: schemas.UpdateMetricRequest, # Use the Pydantic model for the request body

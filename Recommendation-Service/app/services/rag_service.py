@@ -82,11 +82,11 @@ class RAGService:
             - Give **3** prioritized actions (single-line bullets) derived strictly from CONTEXT and the user's highest-priority metrics.
 
             ## Your Nutrition Plan
-            **IMPORTANT:** Use ONLY food items, dietary principles and rationale that appear in the CONTEXT.
+            **IMPORTANT:** Use food items, dietary principles and rationale that appear in the CONTEXT and the internet.
             - ### Foods to Emphasize
-              - List **5–7** foods/groups with 1-line reasons tied to the CONTEXT. For each item add a `Source:` line if available.
+              - List **5–7** foods/groups with 1-line reasons tied to the CONTEXT.
             - ### Foods to Limit
-              - List **5–7** foods/groups to reduce/avoid with 1-line reasons tied to the CONTEXT. Add `Source:` lines where possible.
+              - List **5–7** foods/groups to reduce/avoid with 1-line reasons tied to the CONTEXT.
 
             ## A Day of Healthy Eating
             - Provide one sample day: **Breakfast / Lunch / Dinner / Snack**. Use ONLY food examples and meal patterns present in the CONTEXT. If CONTEXT lacks meal examples, state: "Meal examples not available in context."

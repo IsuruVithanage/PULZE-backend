@@ -1,36 +1,61 @@
-from typing import List
-
+# app/schemas.py
+from typing import List, Optional
 from pydantic import BaseModel
 from datetime import datetime
+from enum import Enum
 
-class ReportBase(BaseModel):
+# --- NEW: Enum for Report Type selection in the API ---
+class ReportType(str, Enum):
+    LIPID = "lipid"
+    BLOOD_SUGAR = "blood_sugar"
+
+# --- Schemas for Lipid Report ---
+class LipidReportBase(BaseModel):
     total_cholesterol: float
     hdl_cholesterol: float
     triglycerides: float
     ldl_cholesterol: float
-    vldl_cholesterol: float
-    non_hdl_cholesterol: float
-    total_hdl_ratio: float
-    triglycerides_hdl_ratio: float
+    vldl_cholesterol: Optional[float] = None
+    non_hdl_cholesterol: Optional[float] = None
+    total_hdl_ratio: Optional[float] = None
+    triglycerides_hdl_ratio: Optional[float] = None
 
-class ReportCreate(ReportBase):
+class LipidReportCreate(LipidReportBase):
     pass
 
-class UpdateMetricRequest(BaseModel):
-    metric_name: str
-    metric_value: float
-
-class ChartDataset(BaseModel):
-    data: List[float]
-
-class ChartResponse(BaseModel):
-    labels: List[str]
-    datasets: List[ChartDataset]
-
-class ReportResponse(ReportBase):
+class LipidReportResponse(LipidReportBase):
     id: int
     user_id: int
     updated_at: datetime
 
     class Config:
         from_attributes = True
+
+# --- Schemas for Blood Sugar Report ---
+class BloodSugarReportBase(BaseModel):
+    fasting_blood_sugar: Optional[float] = None
+    random_blood_sugar: Optional[float] = None
+    hba1c: Optional[float] = None
+
+class BloodSugarReportCreate(BloodSugarReportBase):
+    pass
+
+class BloodSugarReportResponse(BloodSugarReportBase):
+    id: int
+    user_id: int
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+# --- Schemas for Charting and Metric Updates (can be kept generic) ---
+class UpdateMetricRequest(BaseModel):
+    metric_name: str
+    metric_value: float
+
+class ChartDataset(BaseModel):
+    data: List[Optional[float]]
+
+class ChartResponse(BaseModel):
+    labels: List[str]
+    datasets: List[ChartDataset]
