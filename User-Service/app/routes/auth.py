@@ -46,3 +46,24 @@ def logout(response: Response):
 @router.get("/users/me", response_model=schemas.UserResponse)
 def read_users_me(current_user: models.User = Depends(auth.get_current_user)):
     return current_user
+
+
+@router.patch("/users/me/profile", response_model=schemas.UserResponse)
+def update_user_profile(
+        profile_data: schemas.UserProfileUpdate,
+        db: Session = Depends(database.get_db),
+        current_user: models.User = Depends(auth.get_current_user)
+):
+    """
+    Update the profile information for the currently authenticated user.
+    """
+    current_user.name = profile_data.name
+    current_user.age = profile_data.age
+    current_user.gender = profile_data.gender
+    current_user.weight_kg = profile_data.weight_kg
+    current_user.height_cm = profile_data.height_cm
+
+    db.commit()
+    db.refresh(current_user)
+
+    return current_user
