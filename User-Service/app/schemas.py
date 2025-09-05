@@ -31,3 +31,11 @@ class UserResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class UserProfileData(BaseModel):
+    id: int
+    weight_kg: Optional[float]
+    height_cm: Optional[float]
+    gender: Optional[str]
+    age: Optional[int]

@@ -11,6 +11,7 @@ class DocumentCategory(str, Enum):
 
 
 class HealthMetrics(BaseModel):
+    user_id: int = Field(..., description="The ID of the user this report belongs to.")
     gender: str = Field(..., description="Gender of the patient (Male/Female)")
     age: int = Field(..., description="Age in years", ge=0, le=120)
     bmi: float = Field(..., description="Body Mass Index", ge=0)

@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Response
 from sqlalchemy.orm import Session
 from app import schemas, models, auth, database
+from app.schemas import UserProfileData
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -67,3 +68,14 @@ def update_user_profile(
     db.refresh(current_user)
 
     return current_user
+
+
+@router.get("/users/{user_id}/profile", response_model=UserProfileData)
+def get_user_profile_for_service(
+    user_id: int,
+    db: Session = Depends(database.get_db)
+):
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return user

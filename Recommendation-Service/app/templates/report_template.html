@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        @page {
+            size: a4;
+            margin: 1.5cm;
+        }
+        body {
+            font-family: 'Helvetica', sans-serif;
+            font-size: 11pt;
+            color: #333333;
+        }
+        h1 {
+            color: #008060; /* A professional green */
+            font-size: 24pt;
+            margin-bottom: 0;
+            text-align: center;
+            font-weight: bold;
+        }
+        h2 {
+            color: #333333;
+            font-size: 16pt;
+            border-bottom: 2px solid #008060;
+            padding-bottom: 6px;
+            margin-top: 30px;
+            margin-bottom: 15px;
+        }
+        .header-info {
+            text-align: center;
+            color: #777777;
+            margin-bottom: 30px;
+            font-size: 10pt;
+        }
+        .summary {
+            background-color: #f8f8f8;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            border-left: 4px solid #008060;
+            font-style: italic;
+        }
+        p {
+            line-height: 1.5;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+        th, td {
+            border: 1px solid #dddddd;
+            padding: 10px;
+            text-align: left;
+        }
+        th {
+            background-color: #f2f2f2;
+            font-weight: bold;
+        }
+        .disclaimer {
+            margin-top: 40px;
+            font-size: 8pt;
+            color: #888888;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <h1>Health Summary</h1>
+    <div class="header-info">
+        For {{ user_data.name }} ({{ user_data.age }} years old, {{ user_data.gender }})<br>
+        Generated: {{ generation_date }}
+    </div>
+
+    <h2>AI-Generated Clinical Summary</h2>
+    <div class="summary">
+        <p>{{ ai_summary }}</p>
+    </div>
+
+    <h2>Key Metric Trends</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Metric</th>
+                <th>Latest Value</th>
+                <th>Previous Value</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for metric in historical_data %}
+            <tr>
+                <td><strong>{{ metric.name }}</strong></td>
+                <td>{{ metric.latest_value }} {{ metric.unit }}</td>
+                <td>{{ metric.previous_value or 'N/A' }}</td>
+                <td>{{ metric.status }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <div class="disclaimer">
+        This report is a summary of data collected by the Pulze app and is intended for informational purposes. It is not a substitute for a formal medical diagnosis. Always consult with a qualified healthcare provider for personalized health recommendations.
+    </div>
+</body>
+</html>

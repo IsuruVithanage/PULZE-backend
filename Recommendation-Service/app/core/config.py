@@ -9,7 +9,7 @@ class Settings(BaseSettings):
 
     # --- NEW: Groq LLM settings ---
     GROQ_API_KEY: str
-    LLM_MODEL_NAME: str = "openai/gpt-oss-120b" # Or another model available on Groq
+    LLM_MODEL_NAME: str = "openai/gpt-oss-20b" # Or another model available on Groq
     TEMPERATURE: float = 0
 
     # --- NEW: Pinecone settings ---
@@ -24,6 +24,13 @@ class Settings(BaseSettings):
 
     # --- NEW: Suppress HuggingFace Tokenizers warning ---
     TOKENIZERS_PARALLELISM: Optional[str] = "false"
+
+    # --- NEW: AWS and S3 Settings ---
+    # Add these fields to match your .env file
+    AWS_ACCESS_KEY_ID: str
+    AWS_SECRET_ACCESS_KEY: str
+    AWS_REGION: str
+    S3_BUCKET_NAME: str
 
     # Document settings
     PDF_DIRECTORY: str = "data"

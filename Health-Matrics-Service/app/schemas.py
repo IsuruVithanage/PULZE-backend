@@ -50,6 +50,7 @@ class BloodSugarReportResponse(BloodSugarReportBase):
 
 # --- Schemas for Charting and Metric Updates (can be kept generic) ---
 class UpdateMetricRequest(BaseModel):
+    report_type: ReportType  # <-- Add this field
     metric_name: str
     metric_value: float
 
@@ -71,3 +72,17 @@ class CombinedReportResponse(BaseModel):
     random_blood_sugar: Optional[float] = None
     hba1c: Optional[float] = None
     last_updated: Optional[datetime] = None
+
+
+
+class TimeSeriesDataPoint(BaseModel):
+    date: datetime
+    value: Optional[float]
+
+class MetricTimeSeries(BaseModel):
+    name: str
+    unit: str
+    series: List[TimeSeriesDataPoint]
+
+class HistoricalDataResponse(BaseModel):
+    metrics: List[MetricTimeSeries]

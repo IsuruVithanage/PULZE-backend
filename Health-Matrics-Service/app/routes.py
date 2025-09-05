@@ -1,6 +1,7 @@
 from datetime import datetime
-from typing import List
+from typing import List, Union
 
+import httpx
 from dateutil.relativedelta import relativedelta
 from groq import Groq
 
@@ -336,7 +337,7 @@ def get_metric_recommendation(
     try:
         chat_completion = groq_client.chat.completions.create(
             messages=[{"role": "user", "content": prompt}],
-            model="llama3-70b-8192",
+            model="openai/gpt-oss-120b",
         )
         recommendation = chat_completion.choices[0].message.content
         return {"recommendation": recommendation.strip()}
@@ -345,37 +346,48 @@ def get_metric_recommendation(
         raise HTTPException(status_code=500, detail="Failed to get recommendation from AI model.")
 
 
-
-@router.patch("/users/{user_id}/report/metric", response_model=schemas.LipidReportResponse)
+@router.patch(
+    "/users/{user_id}/report/metric",
+    # 2. Use Union to specify multiple possible response models
+    response_model=Union[schemas.LipidReportResponse, schemas.BloodSugarReportResponse]
+)
 def update_health_metric(
-    user_id: int,
-    request: schemas.UpdateMetricRequest,
-    db: Session = Depends(get_db),
+        user_id: int,
+        request: schemas.UpdateMetricRequest,
+        db: Session = Depends(get_db),
 ):
     """
     Updates a single metric in the latest health report for a given user.
+    The response model will match the type of report being updated.
     """
+
+    model_to_query = None
+    lipid_metrics = {
+        "total_cholesterol", "hdl_cholesterol", "triglycerides", "ldl_cholesterol",
+        "vldl_cholesterol", "non_hdl_cholesterol", "total_hdl_ratio", "triglycerides_hdl_ratio"
+    }
+    sugar_metrics = {"fasting_blood_sugar", "random_blood_sugar", "hba1c"}
+
+    if request.metric_name in lipid_metrics:
+        model_to_query = models.LipidReport
+    elif request.metric_name in sugar_metrics:
+        model_to_query = models.BloodSugarReport
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid metric name: '{request.metric_name}'. Not found in any report type."
+        )
+
     latest_report = (
-        db.query(models.Report)
-        .filter(models.Report.user_id == user_id)
-        .order_by(models.Report.updated_at.desc())
+        db.query(model_to_query)
+        .filter(model_to_query.user_id == user_id)
+        .order_by(model_to_query.updated_at.desc())
         .first()
     )
 
     if not latest_report:
         raise HTTPException(
-            status_code=404, detail=f"No report found for user_id {user_id}"
-        )
-
-    allowed_metrics = {
-        "total_cholesterol", "hdl_cholesterol", "triglycerides",
-        "ldl_cholesterol", "vldl_cholesterol", "non_hdl_cholesterol",
-        "total_hdl_ratio", "triglycerides_hdl_ratio"
-    }
-    if request.metric_name not in allowed_metrics:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid metric name: '{request.metric_name}'. Please use one of {list(allowed_metrics)}."
+            status_code=404, detail=f"No report of the required type found for user {user_id} to update."
         )
 
     setattr(latest_report, request.metric_name, request.metric_value)
@@ -457,3 +469,105 @@ def get_user_report_chart_data(
     }
 
     return chart_response
+
+
+@router.get("/users/{user_id}/latest-report")  # Keep your old endpoint name
+def get_latest_combined_report(user_id: int, db: Session = Depends(get_db)):
+    # ... (your existing logic to fetch latest_lipid_report and latest_blood_sugar_report)
+    latest_lipid_report = db.query(models.LipidReport).filter(...).first()
+    latest_blood_sugar_report = db.query(models.BloodSugarReport).filter(...).first()
+
+    # --- NEW: Fetch user profile data and calculate BMI ---
+    bmi = None
+    weight = None
+    try:
+        # Make a server-to-server call to the User-Service
+        profile_url = "http://localhost:8001/api/auth/users/{user_id}/profile"
+        with httpx.Client() as client:
+            res = client.get(profile_url)
+            res.raise_for_status()  # Raise an exception for 4xx/5xx errors
+            profile_data = res.json()
+
+        height_cm = profile_data.get("height_cm")
+        weight_kg = profile_data.get("weight_kg")
+        weight = weight_kg  # To display on the card
+
+        if height_cm and weight_kg:
+            height_m = height_cm / 100
+            if height_m > 0:
+                bmi = round(weight_kg / (height_m * height_m), 1)
+
+    except httpx.RequestError as e:
+        print(f"Could not connect to User-Service: {e}")
+        # Decide how to handle this: fail the request or continue without BMI?
+        # For now, we'll continue without it.
+    except Exception as e:
+        print(f"Error processing user profile data: {e}")
+
+    # 4. Build the combined response dictionary
+    combined_data = {
+        "bmi": bmi,
+        "weight": weight
+    }
+
+    if latest_lipid_report:
+        combined_data.update({
+            "total_cholesterol": latest_lipid_report.total_cholesterol,
+            "hdl_cholesterol": latest_lipid_report.hdl_cholesterol,
+            # ... etc for all lipid fields
+        })
+
+    if latest_blood_sugar_report:
+        combined_data.update({
+            "fasting_blood_sugar": latest_blood_sugar_report.fasting_blood_sugar,
+            # ... etc for all sugar fields
+        })
+
+    return combined_data
+
+@router.get("/users/{user_id}/historical-data", response_model=schemas.HistoricalDataResponse)
+def get_historical_data_for_summary(user_id: int, db: Session = Depends(get_db), months: int = 6):
+    """
+    Fetches a time-series of historical data for key metrics over the last N months.
+    """
+    metrics_to_track = {
+        "Total Cholesterol": {"key": "total_cholesterol", "unit": "mg/dL", "model": models.LipidReport},
+        "LDL Cholesterol": {"key": "ldl_cholesterol", "unit": "mg/dL", "model": models.LipidReport},
+        "HDL Cholesterol": {"key": "hdl_cholesterol", "unit": "mg/dL", "model": models.LipidReport},
+        "Triglycerides": {"key": "triglycerides", "unit": "mg/dL", "model": models.LipidReport},
+        "Fasting Blood Sugar": {"key": "fasting_blood_sugar", "unit": "mg/dL", "model": models.BloodSugarReport},
+    }
+
+    time_series_data = []
+    start_date = datetime.now() - relativedelta(months=months)
+
+    for name, config in metrics_to_track.items():
+        model = config["model"]
+        metric_key = config["key"]
+
+        # Query for all reports within the date range
+        historical_reports = (
+            db.query(model)
+            .filter(model.user_id == user_id, model.updated_at >= start_date)
+            .order_by(model.updated_at.asc())  # Oldest to newest for charting
+            .all()
+        )
+
+        # Create the list of data points
+        series = [
+            schemas.TimeSeriesDataPoint(
+                date=report.updated_at,
+                value=getattr(report, metric_key, None)
+            )
+            for report in historical_reports
+        ]
+
+        time_series_data.append(
+            schemas.MetricTimeSeries(
+                name=name,
+                unit=config["unit"],
+                series=series
+            )
+        )
+
+    return schemas.HistoricalDataResponse(metrics=time_series_data)
