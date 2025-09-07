@@ -39,3 +39,8 @@ class UserProfileData(BaseModel):
     height_cm: Optional[float]
     gender: Optional[str]
     age: Optional[int]
+
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str

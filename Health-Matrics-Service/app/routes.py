@@ -96,6 +96,7 @@ class PresignedRequest(BaseModel):
     user_id: int
     filename: str
     content_type: str
+    report_type: schemas.ReportType
 
 class PresignedUrlResponse(BaseModel):
     upload_url: str
@@ -109,7 +110,10 @@ async def generate_presigned_url(req: PresignedRequest):
 
     try:
         safe_filename = sanitize_filename(req.filename)
-        key = f"uploads/{req.user_id}/{datetime.utcnow().strftime('%Y%m%d%H%M%S')}_{safe_filename}"
+        # --- NEW FILENAME STRUCTURE ---
+        # Example key: "uploads/123/lipid_20250905123000_report.pdf"
+        timestamp = datetime.utcnow().strftime('%Y%m%d%H%M%S')
+        key = f"uploads/{req.user_id}/{req.report_type.value}_{timestamp}_{safe_filename}"
 
         content_type = str(req.content_type)
 
