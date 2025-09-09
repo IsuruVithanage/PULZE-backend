@@ -28,7 +28,7 @@ JSON SCHEMA & FORMAT INSTRUCTIONS:
 PRIORITIES_PROMPT_TEMPLATE = f"""
 {BASE_INSTRUCTIONS}
 
-Based on the CONTEXT and USER PROFILE, identify the 3 most critical health priorities for the user. Return this as a simple JSON list of strings.
+Based on the CONTEXT and USER PROFILE, identify the most critical health priorities for the user. Return this as a simple JSON list of strings.
 
 ---
 CONTEXT:
@@ -47,6 +47,7 @@ NUTRITION_PROMPT_TEMPLATE = f"""
 {BASE_INSTRUCTIONS}
 
 Based on the CONTEXT and USER PROFILE, generate the 'NutritionPlan'. This includes lists of foods to emphasize and foods to limit, complete with reasons and specific Sri Lankan examples.
+**Pay close attention to ensure that every single object in the 'emphasize' and 'limit' lists is complete and contains all required fields: 'group', 'reason', and 'examples'.**
 
 ---
 CONTEXT:
@@ -83,6 +84,27 @@ LIFESTYLE_PROMPT_TEMPLATE = f"""
 {BASE_INSTRUCTIONS}
 
 Based on the CONTEXT and USER PROFILE, generate a list of 'LifestyleRec' recommendations covering topics like Physical Activity, Sleep, Stress Management, and Monitoring. If context is missing for a topic, state that clearly in the recommendation.
+
+---
+CONTEXT:
+{{documents}}
+
+USER PROFILE / QUERY:
+{{question}}
+
+---
+JSON SCHEMA & FORMAT INSTRUCTIONS:
+{{format_instructions}}
+---
+"""
+
+RISK_ASSESSMENT_PROMPT_TEMPLATE = f"""
+{BASE_INSTRUCTIONS}
+
+Based on a holistic review of the CONTEXT and the USER PROFILE, generate a final 'RiskAssessment'.
+1. Determine an overall risk_level (e.g., Low, Moderate, High, Very High) for future cardiovascular and metabolic issues.
+2. Write a concise summary justifying this risk level.
+3. Provide a list of 2-3 concrete, high-priority next_steps the user should take.
 
 ---
 CONTEXT:

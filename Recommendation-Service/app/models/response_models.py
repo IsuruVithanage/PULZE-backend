@@ -43,10 +43,18 @@ class LifestylePlan(BaseModel):
 # ---------------------------------------------
 
 
-# --- The Final, Assembled Response Model (Unchanged) ---
+class RiskAssessment(BaseModel):
+    risk_level: str = Field(description="A qualitative assessment of the user's overall health risk (e.g., 'Low', 'Moderate', 'High').")
+    summary: str = Field(description="A concise paragraph explaining the reasoning for the risk level, summarizing the key factors.")
+    next_steps: List[str] = Field(description="A list of 2-3 most critical, actionable next steps for the user.")
+
+# ... (HealthOverview, NutritionPlan, MealPlan, etc. are unchanged)
+
+# --- 2. UPDATE the final response model to include the new section ---
 class StructuredRecommendationResponse(BaseModel):
-    healthOverview: Optional[HealthOverview]
-    topPriorities: Optional[List[str]]
-    nutritionPlan: Optional[NutritionPlan]
-    mealPlan: Optional[MealPlan]
-    lifestyle: Optional[List[LifestyleRec]]
+    healthOverview: Optional[HealthOverview] = Field(default_factory=HealthOverview)
+    topPriorities: Optional[List[str]] = Field(default_factory=list)
+    nutritionPlan: Optional[NutritionPlan] = Field(default_factory=NutritionPlan)
+    mealPlan: Optional[MealPlan] = Field(default_factory=MealPlan)
+    lifestyle: Optional[List[LifestyleRec]] = Field(default_factory=list)
+    riskAssessment: Optional[RiskAssessment] # <-- ADD THIS NEW FIELD

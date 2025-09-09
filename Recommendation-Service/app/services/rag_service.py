@@ -10,7 +10,7 @@ from langchain_community.document_loaders import PyMuPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from app.core.config import settings
 from app.models.response_models import StructuredRecommendationResponse, HealthOverview, NutritionPlan, MealPlan, \
-    LifestyleRec, TopPriorities, LifestylePlan
+    LifestyleRec, TopPriorities, LifestylePlan, RiskAssessment
 from app.prompts import prompts
 from app.services.vector_store import get_or_create_vector_store, embedding_model
 from typing import Dict, Any, List
@@ -146,13 +146,15 @@ class RAGService:
         self.vectorstore = get_or_create_vector_store()
         base_retriever = self.vectorstore.as_retriever(search_kwargs={'k': settings.RETRIEVER_K})
         self.retriever = MultiQueryRetriever.from_llm(retriever=base_retriever, llm=self.llm)
+        self.embedding_model = embedding_model
 
         # --- UPDATE: Use the new wrapper models for list-based tasks ---
         self.overview_chain = self._create_chain(prompts.OVERVIEW_PROMPT_TEMPLATE, HealthOverview)
         self.priorities_chain = self._create_chain(prompts.PRIORITIES_PROMPT_TEMPLATE, TopPriorities)  # Changed
         self.nutrition_chain = self._create_chain(prompts.NUTRITION_PROMPT_TEMPLATE, NutritionPlan)
         self.meal_plan_chain = self._create_chain(prompts.MEAL_PLAN_PROMPT_TEMPLATE, MealPlan)
-        self.lifestyle_chain = self._create_chain(prompts.LIFESTYLE_PROMPT_TEMPLATE, LifestylePlan)  # Changed
+        self.lifestyle_chain = self._create_chain(prompts.LIFESTYLE_PROMPT_TEMPLATE, LifestylePlan)
+        self.risk_assessment_chain = self._create_chain(prompts.RISK_ASSESSMENT_PROMPT_TEMPLATE, RiskAssessment)# Changed
 
         self._initialized = True
         print("RAG Orchestration Service initialized successfully!")
@@ -204,10 +206,11 @@ class RAGService:
             self._generate_task(self.nutrition_chain, concise_context, ""),
             self._generate_task(self.meal_plan_chain, concise_context, ""),
             self._generate_task(self.lifestyle_chain, concise_context, ""),
+            self._generate_task(self.risk_assessment_chain, question, doc_texts),
         ]
 
         secondary_results = await asyncio.gather(*tasks)
-        priorities_result, nutrition_result, meal_plan_result, lifestyle_result = secondary_results
+        priorities_result, nutrition_result, meal_plan_result, lifestyle_result, risk_assessment_result = secondary_results
 
         # --- STEP 4: Assemble the final response ---
         final_priorities = priorities_result.priorities if priorities_result else None
@@ -219,6 +222,7 @@ class RAGService:
             nutritionPlan=nutrition_result,
             mealPlan=meal_plan_result,
             lifestyle=final_lifestyle,
+            riskAssessment=risk_assessment_result,
         )
 
     async def add_pdf_to_index(self, pdf_path: str):
