@@ -1,15 +1,130 @@
 import os
+import asyncio
 
 from langchain.retrievers import MultiQueryRetriever
+from langchain_core.runnables import Runnable
 from langchain_groq import ChatGroq
 from langchain.prompts import PromptTemplate
-from langchain_core.output_parsers import StrOutputParser
-from langchain_community.document_loaders import PyPDFLoader
+from langchain_core.output_parsers import StrOutputParser, JsonOutputParser, PydanticOutputParser
+from langchain_community.document_loaders import PyMuPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from app.core.config import settings
-from app.services.vector_store import get_or_create_vector_store
+from app.models.response_models import StructuredRecommendationResponse, HealthOverview, NutritionPlan, MealPlan, \
+    LifestyleRec, TopPriorities, LifestylePlan
+from app.prompts import prompts
+from app.services.vector_store import get_or_create_vector_store, embedding_model
 from typing import Dict, Any, List
 from langchain_core.documents import Document
+import nltk
+from sklearn.metrics.pairwise import cosine_similarity
+import numpy as np
+# -----------------
+from langchain.retrievers import MultiQueryRetriever
+
+
+def _load_and_split_pdf(pdf_path: str, embedding_model, similarity_threshold: float) -> List[Document]:
+    """
+    Loads a PDF and splits it into context-aware chunks based on sentence similarity.
+    """
+    print(f"Starting contextual chunking for: {pdf_path}")
+    try:
+        pdf_loader = PyMuPDFLoader(pdf_path)  # Previously PyPDFLoader(pdf_path)
+        # ----------------------------
+        docs = pdf_loader.load()
+        full_text = "\n".join([doc.page_content for doc in docs])
+
+        # 1. Split the text into sentences
+        sentences = nltk.sent_tokenize(full_text)
+        if not sentences:
+            print("Warning: No sentences found in document.")
+            return []
+
+        print(f"Document split into {len(sentences)} sentences.")
+
+        # 2. Generate embeddings for each sentence
+        sentence_embeddings = embedding_model.embed_documents(sentences)
+        print("Sentence embeddings generated.")
+
+        # 3. Calculate similarity between adjacent sentences
+        similarities = []
+        for i in range(len(sentence_embeddings) - 1):
+            embedding1 = np.array(sentence_embeddings[i]).reshape(1, -1)
+            embedding2 = np.array(sentence_embeddings[i + 1]).reshape(1, -1)
+            sim = cosine_similarity(embedding1, embedding2)[0][0]
+            similarities.append(sim)
+
+        print("Calculated similarities between adjacent sentences.")
+
+        # 4. Group sentences into chunks based on the similarity threshold
+        chunks = []
+        current_chunk_sentences = [sentences[0]]
+
+        for i in range(len(similarities)):
+            # If similarity is below the threshold, a new topic begins
+            if similarities[i] < similarity_threshold:
+                # Finalize the current chunk
+                chunks.append(" ".join(current_chunk_sentences))
+                # Start a new chunk with the next sentence
+                current_chunk_sentences = [sentences[i + 1]]
+            else:
+                # Otherwise, add the next sentence to the current chunk
+                current_chunk_sentences.append(sentences[i + 1])
+
+        # Add the last remaining chunk
+        if current_chunk_sentences:
+            chunks.append(" ".join(current_chunk_sentences))
+
+        print(f"Grouped sentences into {len(chunks)} contextual chunks.")
+
+        # 5. Create Document objects for each chunk, preserving metadata
+        # (This part is similar to your previous logic for metadata)
+        path_parts = pdf_path.split(os.sep)
+        category = "unknown"
+        if "sources" in path_parts:
+            category_index = path_parts.index("sources") + 1
+            if category_index < len(path_parts):
+                category = path_parts[category_index]
+
+        source_filename = os.path.basename(pdf_path)
+
+        chunk_documents = []
+        for i, chunk_text in enumerate(chunks):
+            chunk_doc = Document(
+                page_content=chunk_text,
+                metadata={
+                    "source": source_filename,
+                    "category": category,
+                    "chunk_number": i + 1
+                }
+            )
+            chunk_documents.append(chunk_doc)
+
+        return chunk_documents
+
+    except Exception as e:
+        print(f"Error during contextual chunking for {pdf_path}: {e}")
+        raise
+
+
+def format_metrics_to_question(metrics: Dict[str, Any], additional_info: str = None) -> str:
+    # ... (paste your existing format_metrics_to_question function here)
+    gender = metrics.get('gender', 'Not provided')
+    age = metrics.get('age', 'Not provided')
+    bmi = metrics.get('bmi', 'Not provided')
+    cholesterol = metrics.get('cholesterol', 'Not provided')
+    hdl = metrics.get('hdl', 'Not provided')
+    ldl = metrics.get('ldl', 'Not provided')
+    triglycerides = metrics.get('triglycerides', 'Not provided')
+    fasting_blood_sugar = metrics.get('fasting_blood_sugar', 'Not provided')
+    question_parts = [
+        f"Gender: {gender}", f"Age: {age}", f"BMI: {bmi}",
+        f"Total Cholesterol: {cholesterol} mg/dL", f"HDL: {hdl} mg/dL", f"LDL: {ldl} mg/dL",
+        f"Triglycerides: {triglycerides} mg/dL", f"Fasting Blood Sugar: {fasting_blood_sugar} mg/dL"
+    ]
+    question = ", ".join(part for part in question_parts if "Not provided" not in part)
+    if additional_info:
+        question += f". Additional information: {additional_info}"
+    return question
 
 
 class RAGService:
@@ -25,169 +140,108 @@ class RAGService:
         if self._initialized:
             return
 
-        print("Initializing RAG Service with Pinecone and Groq...")
-
-        # Initialize the LLM with Groq
-        self.llm = ChatGroq(
-            temperature=settings.TEMPERATURE,
-            groq_api_key=settings.GROQ_API_KEY,
-            model_name=settings.LLM_MODEL_NAME,
-        )
-
-        # Get the vector store from our dedicated service
+        print("Initializing RAG Orchestration Service...")
+        self.llm = ChatGroq(temperature=settings.TEMPERATURE, groq_api_key=settings.GROQ_API_KEY,
+                            model_name=settings.LLM_MODEL_NAME)
         self.vectorstore = get_or_create_vector_store()
         base_retriever = self.vectorstore.as_retriever(search_kwargs={'k': settings.RETRIEVER_K})
+        self.retriever = MultiQueryRetriever.from_llm(retriever=base_retriever, llm=self.llm)
 
-        # Initialize the Multi-Query Retriever
-        self.retriever = MultiQueryRetriever.from_llm(
-            retriever=base_retriever,
-            llm=self.llm
-        )
-
-        # Define the prompt template
-        self.prompt = PromptTemplate(
-            template="""
-            You are a professional AI health assistant (nutrition & lifestyle).  
-            Use ONLY the provided CONTEXT to generate a personalized recommendation for the USER. 
-            If required information is missing from the CONTEXT, state: "This information is not available in the provided context."
-
-            ---
-            CONTEXT:
-            {documents}
-
-            USER PROFILE / QUERY:
-            {question}
-
-            ---
-            OUTPUT RULES
-            - Output must be valid Markdown only. Do NOT use emojis, images, or HTML.
-            - Tone: professional, encouraging, non-alarming, and actionable.
-            - DO NOT provide medical diagnoses or medication advice.
-            - If the CONTEXT does not contain a required food, guideline, or numeric range, write: "Not available in the provided context."
-            - Where you reference a guideline or recommendation from CONTEXT, add a short inline citation line under the relevant subsection: `Source: <document id or title from CONTEXT>` (if available).
-
-            ---
-            REQUIRED RESPONSE STRUCTURE (use these exact headings and ordering):
-
-            ## Your Health Overview
-            Write a **detailed, paragraph-style explanation** of the user’s current health situation.  
-            - Discuss each major metric (BMI, cholesterol profile, triglycerides, HDL, LDL, blood sugar, blood pressure, age/gender context) in plain language.  
-            - For each metric, include the user’s value, how it compares to the normal range, and what that implies.  
-            - Instead of listing values in a rigid table, weave them into **insightful sentences** that connect the dots, e.g.,  
-              *“Your BMI of 28 falls above the normal range, suggesting overweight status, which may contribute to cardiovascular risk when combined with slightly elevated triglycerides.”*  
-            - Use short **bullets for emphasis** if multiple issues are present, but focus on smooth readability rather than a strict data report.  
-            - End this section with a **summary paragraph** giving an overall impression of the user’s current health status and risk level (low, moderate, high), based strictly on CONTEXT.
-
-            ## Your Top Priorities
-            - Give **3** prioritized actions (single-line bullets) derived strictly from CONTEXT and the user's highest-priority metrics.
-
-            ## Your Nutrition Plan
-            **IMPORTANT:** Use food items, dietary principles and rationale that appear in the CONTEXT and the internet.
-            - ### Foods to Emphasize
-              - List **5–7** foods/groups with 1-line reasons tied to the CONTEXT.
-            - ### Foods to Limit
-              - List **5–7** foods/groups to reduce/avoid with 1-line reasons tied to the CONTEXT.
-
-            ## A Day of Healthy Eating
-            - Provide one sample day: **Breakfast / Lunch / Dinner / Snack**. Use ONLY food examples and meal patterns present in the CONTEXT. If CONTEXT lacks meal examples, state: "Meal examples not available in context."
-
-            ## Lifestyle Recommendations
-            - Actionable bullets for **Physical Activity**, **Sleep**, **Stress Management**, and **Monitoring**.
-            - Each bullet must be grounded in CONTEXT; if CONTEXT lacks guidance for any subtopic, state "Not available in the provided context for <subtopic>."
-
-            ---
-            FINAL LINE (must be exact):
-            **Disclaimer: This information is for educational purposes only and is not a substitute for professional medical advice. Always consult with a qualified healthcare provider for personalized health recommendations.**
-
-            """,
-            input_variables=["question", "documents"],
-        )
-
-        # Your existing chain will work perfectly with this new prompt
-        # self.rag_chain = self.prompt | self.llm | StrOutputParser()
-        # Create the RAG chain
-        self.rag_chain = self.prompt | self.llm | StrOutputParser()
-
-        # A simple chain for cases where retrieval might fail or isn't needed
-        self.simple_chain = (
-                PromptTemplate.from_template(
-                    """
-                    You are an expert nutritionist. Based on your general knowledge, provide a detailed diet and lifestyle recommendation for the following health profile: {question}.
-                    RECOMMENDATION:
-                    """
-                )
-                | self.llm
-                | StrOutputParser()
-        )
+        # --- UPDATE: Use the new wrapper models for list-based tasks ---
+        self.overview_chain = self._create_chain(prompts.OVERVIEW_PROMPT_TEMPLATE, HealthOverview)
+        self.priorities_chain = self._create_chain(prompts.PRIORITIES_PROMPT_TEMPLATE, TopPriorities)  # Changed
+        self.nutrition_chain = self._create_chain(prompts.NUTRITION_PROMPT_TEMPLATE, NutritionPlan)
+        self.meal_plan_chain = self._create_chain(prompts.MEAL_PLAN_PROMPT_TEMPLATE, MealPlan)
+        self.lifestyle_chain = self._create_chain(prompts.LIFESTYLE_PROMPT_TEMPLATE, LifestylePlan)  # Changed
 
         self._initialized = True
-        print("RAG Service initialized successfully!")
+        print("RAG Orchestration Service initialized successfully!")
 
-    def _load_and_split_pdf(self, pdf_path: str) -> List[Document]:
-        """Loads a PDF and splits it into manageable chunks."""
+    # --- SIMPLIFIED HELPER FUNCTION ---
+    def _create_chain(self, prompt_template: str, pydantic_object: Any) -> Runnable:
+        """Helper to create a LangChain runnable for a specific Pydantic model."""
+        parser = PydanticOutputParser(pydantic_object=pydantic_object)
+        prompt = PromptTemplate(
+            template=prompt_template,
+            input_variables=["question", "documents"],
+            partial_variables={"format_instructions": parser.get_format_instructions()},
+        )
+        return prompt | self.llm | parser
+
+    async def _generate_task(self, chain: Runnable, question: str, documents: str):
+        """Helper to run a chain and handle errors gracefully."""
         try:
-            pdf_loader = PyPDFLoader(pdf_path)
-            docs = pdf_loader.load()
-
-            text_splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(
-                chunk_size=settings.CHUNK_SIZE,
-                chunk_overlap=settings.CHUNK_OVERLAP
-            )
-            return text_splitter.split_documents(docs)
+            return await chain.ainvoke({"question": question, "documents": documents})
         except Exception as e:
-            print(f"Error loading or splitting PDF at {pdf_path}: {e}")
-            raise
+            print(f"Error in generating task for chain {chain}: {e}")
+            return None
+
+    async def generate_structured_recommendation(
+            self, metrics: Dict[str, Any], additional_info: str = None
+    ) -> StructuredRecommendationResponse:
+        """Orchestrates LLM calls efficiently by chaining context."""
+        question = format_metrics_to_question(metrics, additional_info)
+
+        # --- STEP 1: Heavy RAG call for the main overview ---
+        print("Step 1: Performing initial RAG call for overview...")
+        documents = await self.retriever.ainvoke(question)
+        doc_texts = "\n---\n".join([doc.page_content for doc in documents])
+        overview_result = await self._generate_task(self.overview_chain, question, doc_texts)
+
+        # If the most important call fails, we can't proceed.
+        if not overview_result:
+            raise Exception("Failed to generate the core health overview.")
+
+        # --- STEP 2: Create a concise context from the first result ---
+        # This new context is much smaller than the original RAG documents.
+        concise_context = f"User Profile: {question}\n\nHealth Overview Summary: {overview_result.summary}"
+        print("Step 2: Created concise context for subsequent calls.")
+
+        # --- STEP 3: Run remaining tasks concurrently with the smaller context ---
+        print("Step 3: Running secondary tasks concurrently...")
+        tasks = [
+            self._generate_task(self.priorities_chain, concise_context, ""),  # doc_texts is now empty
+            self._generate_task(self.nutrition_chain, concise_context, ""),
+            self._generate_task(self.meal_plan_chain, concise_context, ""),
+            self._generate_task(self.lifestyle_chain, concise_context, ""),
+        ]
+
+        secondary_results = await asyncio.gather(*tasks)
+        priorities_result, nutrition_result, meal_plan_result, lifestyle_result = secondary_results
+
+        # --- STEP 4: Assemble the final response ---
+        final_priorities = priorities_result.priorities if priorities_result else None
+        final_lifestyle = lifestyle_result.recommendations if lifestyle_result else None
+
+        return StructuredRecommendationResponse(
+            healthOverview=overview_result,
+            topPriorities=final_priorities,
+            nutritionPlan=nutrition_result,
+            mealPlan=meal_plan_result,
+            lifestyle=final_lifestyle,
+        )
 
     async def add_pdf_to_index(self, pdf_path: str):
-        """Loads, splits, and indexes a PDF into Pinecone."""
+        """Loads, splits, and indexes a PDF into Pinecone using contextual chunking."""
         print(f"Processing and indexing PDF: {pdf_path}")
-        doc_splits = self._load_and_split_pdf(pdf_path)
+        doc_splits = _load_and_split_pdf(
+            pdf_path,
+            self.embedding_model,
+            settings.CONTEXTUAL_CHUNK_SIMILARITY_THRESHOLD
+        )
 
-        # Add documents to the Pinecone index.
-        # This will embed the documents and upload them.
+        if not doc_splits:
+            print(f"Skipping indexing for {pdf_path} as no chunks were generated.")
+            return
+
         await self.vectorstore.aadd_documents(doc_splits)
-        print(f"Successfully indexed {len(doc_splits)} document chunks from {pdf_path}")
+        print(f"Successfully indexed {len(doc_splits)} contextual chunks from {pdf_path}")
 
     # In app/services/rag_service.py within the RAGService class
 
-    def format_metrics_to_question(self, metrics: Dict[str, Any], additional_info: str = None) -> str:
-        """Formats health metrics into a natural language query for the RAG system."""
-
-        # Use .get() for safety in case a key is missing from the input
-        gender = metrics.get('gender', 'Not provided')
-        age = metrics.get('age', 'Not provided')
-        bmi = metrics.get('bmi', 'Not provided')
-        cholesterol = metrics.get('cholesterol', 'Not provided')
-        hdl = metrics.get('hdl', 'Not provided')
-        ldl = metrics.get('ldl', 'Not provided')
-        triglycerides = metrics.get('triglycerides', 'Not provided')
-
-        # --- ADD THE NEW METRIC HERE ---
-        fasting_blood_sugar = metrics.get('fasting_blood_sugar', 'Not provided')
-
-        # Construct the question string, including the new metric
-        question_parts = [
-            f"Gender: {gender}",
-            f"Age: {age}",
-            f"BMI: {bmi}",
-            f"Total Cholesterol: {cholesterol} mg/dL",
-            f"HDL: {hdl} mg/dL",
-            f"LDL: {ldl} mg/dL",
-            f"Triglycerides: {triglycerides} mg/dL",
-            f"Fasting Blood Sugar: {fasting_blood_sugar} mg/dL"  # <-- New part added
-        ]
-
-        # Filter out any parts where the data was not provided
-        question = ", ".join(part for part in question_parts if "Not provided" not in part)
-
-        if additional_info:
-            question += f". Additional information: {additional_info}"
-
-        return question
-
     async def get_recommendation(self, metrics: Dict[str, Any], additional_info: str = None) -> str:
         """Gets a diet recommendation using the RAG chain."""
-        question = self.format_metrics_to_question(metrics, additional_info)
+        question = format_metrics_to_question(metrics, additional_info)
         print(f"Formatted query for RAG: {question}")
 
         try:
@@ -202,6 +256,8 @@ class RAGService:
 
             # Invoke the RAG chain with the formatted question and retrieved documents
             answer = await self.rag_chain.ainvoke({"question": question, "documents": doc_texts})
+            print("ANswerrrrrrr")
+            print(answer)
             return answer
         except Exception as e:
             print(f"Error during RAG chain invocation: {e}")
@@ -235,7 +291,16 @@ class RAGService:
                     try:
                         # Re-using the existing add_pdf_to_index logic
                         # First, load and split to get the chunk count
-                        doc_splits = self._load_and_split_pdf(file_path)
+                        doc_splits = _load_and_split_pdf(
+                            file_path,
+                            self.embedding_model,
+                            settings.CONTEXTUAL_CHUNK_SIMILARITY_THRESHOLD
+                        )
+
+                        if not doc_splits:
+                            print(f"Skipping indexing for {filename} as no chunks were generated.")
+                            continue
+
                         chunk_count = len(doc_splits)
 
                         # Then, add to the vector store
@@ -251,7 +316,7 @@ class RAGService:
         summary = {
             "indexed_files": indexed_files_count,
             "total_chunks_indexed": total_chunks_count,
-            "message": "Full re-indexing process completed."
+            "message": "Full re-indexing process with contextual chunking completed."
         }
         print(summary)
         return summary

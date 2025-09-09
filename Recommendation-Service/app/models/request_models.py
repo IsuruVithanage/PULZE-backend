@@ -7,6 +7,7 @@ from enum import Enum
 class DocumentCategory(str, Enum):
     DIETARY = "dietary"
     GENERAL = "general"
+    RISK_ASSESSMENT = "risk_assessment"
 # ---------------------
 
 

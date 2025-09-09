@@ -7,6 +7,7 @@ from botocore.exceptions import NoCredentialsError
 from dotenv import load_dotenv
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form
 from app.models.request_models import RecommendationRequest, RecommendationResponse, DocumentCategory
+from app.models.response_models import StructuredRecommendationResponse
 from app.services.rag_service import RAGService
 from app.core.config import settings
 from app.utils import pdf_generator
@@ -31,23 +32,24 @@ def get_rag_service():
         raise HTTPException(status_code=500, detail=f"Error initializing RAG service: {str(e)}")
 
 
-@router.post("/recommendation", response_model=RecommendationResponse)
+@router.post("/recommendation", response_model=StructuredRecommendationResponse)
 async def get_diet_recommendation(
         request: RecommendationRequest,
         rag_service: RAGService = Depends(get_rag_service)
 ):
     """
-    Get diet recommendations based on health metrics.
-    This endpoint uses the knowledge base indexed in Pinecone.
+    Get a structured diet recommendation based on health metrics.
     """
     try:
         metrics_dict = request.health_metrics.model_dump()
-        recommendation = await rag_service.get_recommendation(
+        # Call the new orchestration method
+        recommendation_object = await rag_service.generate_structured_recommendation(
             metrics=metrics_dict,
             additional_info=request.additional_info
         )
-        return RecommendationResponse(recommendation=recommendation)
+        return recommendation_object
     except Exception as e:
+        # The service will now raise an error only on catastrophic failure
         raise HTTPException(status_code=500, detail=f"Error generating recommendation: {str(e)}")
 
 

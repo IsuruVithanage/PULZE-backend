@@ -25,6 +25,7 @@ async def _proxy_to_recommendation_service(path: str, request: Request, user_id:
     # --- APPLY THE TIMEOUT CONFIGURATION HERE ---
     async with httpx.AsyncClient(timeout=TIMEOUT_CONFIG) as client:
         url = f"{RECOMMENDATION_SERVICE_URL}/{path}"
+        print(url)
         headers = dict(request.headers)
         headers["X-User-ID"] = user_id
         headers.pop('host', None)

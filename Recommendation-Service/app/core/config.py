@@ -9,7 +9,7 @@ class Settings(BaseSettings):
 
     # --- NEW: Groq LLM settings ---
     GROQ_API_KEY: str
-    LLM_MODEL_NAME: str = "openai/gpt-oss-20b" # Or another model available on Groq
+    LLM_MODEL_NAME: str = "openai/gpt-oss-120b" # Or another model available on Groq
     TEMPERATURE: float = 0
 
     # --- NEW: Pinecone settings ---
@@ -36,6 +36,8 @@ class Settings(BaseSettings):
     PDF_DIRECTORY: str = "data"
     CHUNK_SIZE: int = 500
     CHUNK_OVERLAP: int = 50
+
+    CONTEXTUAL_CHUNK_SIMILARITY_THRESHOLD: float = 0.75
 
     # Vector store settings
     RETRIEVER_K: int = 5
