@@ -9,7 +9,7 @@ class Settings(BaseSettings):
 
     # --- NEW: Groq LLM settings ---
     GROQ_API_KEY: str
-    LLM_MODEL_NAME: str = "openai/gpt-oss-120b" # Or another model available on Groq
+    LLM_MODEL_NAME: str = "openai/gpt-oss-20b" # Or another model available on Groq
     TEMPERATURE: float = 0
 
     # --- NEW: Pinecone settings ---

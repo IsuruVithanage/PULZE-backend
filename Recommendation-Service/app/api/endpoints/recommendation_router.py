@@ -1,3 +1,4 @@
+import asyncio
 import tempfile
 from datetime import datetime
 
@@ -5,12 +6,13 @@ import boto3
 import httpx
 from botocore.exceptions import NoCredentialsError
 from dotenv import load_dotenv
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, Header
 from app.models.request_models import RecommendationRequest, RecommendationResponse, DocumentCategory
 from app.models.response_models import StructuredRecommendationResponse
 from app.services.rag_service import RAGService
 from app.core.config import settings
 from app.utils import pdf_generator
+from app.utils.dependencies import get_user_id_from_gateway
 from app.utils.pdf_loader import save_uploaded_pdf
 from app.models import request_models as schemas
 import os
@@ -34,23 +36,69 @@ def get_rag_service():
 
 @router.post("/recommendation", response_model=StructuredRecommendationResponse)
 async def get_diet_recommendation(
-        request: RecommendationRequest,
-        rag_service: RAGService = Depends(get_rag_service)
+        rag_service: RAGService = Depends(get_rag_service),
+        x_user_id: str = Header(...)
 ):
-    """
-    Get a structured diet recommendation based on health metrics.
-    """
     try:
-        metrics_dict = request.health_metrics.model_dump()
-        # Call the new orchestration method
+        user_id = int(x_user_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="Invalid X-User-ID header format.")
+
+    user_service_base_url = "http://localhost:8001"
+    metrics_service_base_url = "http://localhost:8002"
+
+    # Define the two required URLs
+    profile_url = f"{user_service_base_url}/api/auth/users/{user_id}/profile"
+    latest_report_url = f"{metrics_service_base_url}/api/users/{user_id}/latest-report"
+
+    try:
+        async with httpx.AsyncClient() as client:
+            # 1. Remove the 'additional_info_res' from gather
+            profile_res, metrics_res = await asyncio.gather(
+                client.get(profile_url),
+                client.get(latest_report_url)
+            )
+
+            profile_res.raise_for_status()
+            metrics_res.raise_for_status()
+
+            # 2. Get all user data from the single profile response
+            user_profile = profile_res.json()
+            latest_report = metrics_res.json()
+
+        # ... (calculate_bmi function remains the same) ...
+        def calculate_bmi(weight, height):
+            if not weight or not height: return None
+            return round(weight / ((height / 100) ** 2), 1)
+
+        metrics_dict = {
+            "user_id": user_id,
+            "gender": user_profile.get("gender"),
+            "age": user_profile.get("age"),
+            "bmi": calculate_bmi(user_profile.get("weight_kg"), user_profile.get("height_cm")),
+            "cholesterol": latest_report.get("total_cholesterol"),
+            "hdl": latest_report.get("hdl_cholesterol"),
+            "ldl": latest_report.get("ldl_cholesterol"),
+            "triglycerides": latest_report.get("triglycerides"),
+            "fasting_blood_sugar": latest_report.get("fasting_blood_sugar"),
+            "hba1c": latest_report.get("hba1c"),
+        }
+
+        # 3. Get additional info directly from the user_profile object
         recommendation_object = await rag_service.generate_structured_recommendation(
             metrics=metrics_dict,
-            additional_info=request.additional_info
+            reported_conditions=user_profile.get("health_conditions"),
+            reported_habits=user_profile.get("lifestyle_habits"),
+            additional_info=""
         )
         return recommendation_object
+
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code,
+                            detail=f"Error from downstream service: {e.response.text}")
     except Exception as e:
-        # The service will now raise an error only on catastrophic failure
-        raise HTTPException(status_code=500, detail=f"Error generating recommendation: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"An error occurred during recommendation orchestration: {str(e)}")
+
 
 
 @router.post("/document/upload", status_code=201)

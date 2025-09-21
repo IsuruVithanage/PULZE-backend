@@ -1,5 +1,6 @@
 from pydantic import BaseModel, EmailStr
-from typing import Optional
+from typing import Optional, List
+
 
 # --- NEW: Schema for updating user profile data ---
 class UserProfileUpdate(BaseModel):
@@ -19,26 +20,48 @@ class UserLogin(BaseModel):
     password: str
 
 
+class AdditionalInfoUpdate(BaseModel):
+    health_conditions: Optional[List[str]] = None
+    lifestyle_habits: Optional[List[str]] = None
+
+
+# --- [NEW] Schema for responding with the additional info ---
+class AdditionalInfoResponse(BaseModel):
+    health_conditions: Optional[List[str]] = []
+    lifestyle_habits: Optional[List[str]] = []
+
+    class Config:
+        from_attributes = True
+
 # --- UPDATED: UserResponse now includes all profile fields ---
 class UserResponse(BaseModel):
     id: int
-    email: EmailStr
+    email: str
     name: Optional[str] = None
     age: Optional[int] = None
     gender: Optional[str] = None
     weight_kg: Optional[float] = None
     height_cm: Optional[float] = None
+    # Add the new fields
+    health_conditions: Optional[List[str]] = []
+    lifestyle_habits: Optional[List[str]] = []
 
     class Config:
         from_attributes = True
 
 
 class UserProfileData(BaseModel):
-    id: int
-    weight_kg: Optional[float]
-    height_cm: Optional[float]
-    gender: Optional[str]
-    age: Optional[int]
+    name: Optional[str] = None
+    age: Optional[int] = None
+    gender: Optional[str] = None
+    weight_kg: Optional[float] = None
+    height_cm: Optional[float] = None
+    # Add the new fields
+    health_conditions: Optional[List[str]] = []
+    lifestyle_habits: Optional[List[str]] = []
+
+    class Config:
+        from_attributes = True
 
 
 class Token(BaseModel):

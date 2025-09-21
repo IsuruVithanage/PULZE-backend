@@ -86,3 +86,25 @@ def get_user_profile_for_service(user_id: int, db: Session = Depends(database.ge
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return user
+
+
+
+@router.put("/users/me/additional-info", response_model=schemas.AdditionalInfoResponse)
+def update_additional_info(
+    info_data: schemas.AdditionalInfoUpdate,
+    db: Session = Depends(database.get_db),
+    current_user_id: int = Depends(get_user_id_from_header)
+):
+    user = db.query(models.User).filter(models.User.id == current_user_id).first()
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Update fields if they are provided in the request
+    if info_data.health_conditions is not None:
+        user.health_conditions = info_data.health_conditions
+    if info_data.lifestyle_habits is not None:
+        user.lifestyle_habits = info_data.lifestyle_habits
+
+    db.commit()
+    db.refresh(user)
+    return user

@@ -1,6 +1,7 @@
 import os
 import asyncio
 
+from langchain.output_parsers import OutputFixingParser
 from langchain.retrievers import MultiQueryRetriever
 from langchain_core.runnables import Runnable
 from langchain_groq import ChatGroq
@@ -18,7 +19,6 @@ from langchain_core.documents import Document
 import nltk
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
-# -----------------
 from langchain.retrievers import MultiQueryRetriever
 
 
@@ -44,13 +44,11 @@ def _load_and_split_pdf(pdf_path: str, embedding_model, similarity_threshold: fl
             if len(text) > MIN_TEXT_LENGTH:
                 print(f"Success! {loader_name} extracted {len(text)} characters.")
                 full_text = text
-                break  # Exit the loop on first success
+                break
         except Exception as e:
             print(f"{loader_name} failed: {e}")
             continue
 
-    # --- STAGE 2: OCR FALLBACK ---
-    # If both standard loaders failed, attempt OCR as a last resort.
     if not full_text:
         print("Warning: Standard loaders failed. Falling back to OCR with Unstructured...")
         try:
@@ -62,10 +60,8 @@ def _load_and_split_pdf(pdf_path: str, embedding_model, similarity_threshold: fl
                 full_text = text
         except Exception as e:
             print(f"FATAL: OCR loader also failed for {pdf_path}: {e}")
-            return []  # If all loaders fail, we must skip this file.
+            return []
 
-    # --- STAGE 3: HYBRID CHUNKING ---
-    # Now we are guaranteed to have text, we apply our hybrid chunking.
     print("Proceeding to hybrid chunking stage...")
     try:
         sentences = nltk.sent_tokenize(full_text)
@@ -82,7 +78,6 @@ def _load_and_split_pdf(pdf_path: str, embedding_model, similarity_threshold: fl
             chunk_texts = text_splitter.split_text(full_text)
         else:
             print(f"Document has {len(sentences)} sentences. Using Contextual Chunker.")
-            # Your full contextual chunking logic
             sentence_embeddings = embedding_model.embed_documents(sentences)
             similarities = []
             for i in range(len(sentence_embeddings) - 1):
@@ -105,7 +100,6 @@ def _load_and_split_pdf(pdf_path: str, embedding_model, similarity_threshold: fl
 
         print(f"Successfully split document into {len(chunk_texts)} chunks.")
 
-        # --- STAGE 4: METADATA and DOCUMENT CREATION ---
         path_parts = pdf_path.split(os.sep)
         category = "unknown"
         if "sources" in path_parts:
@@ -196,15 +190,17 @@ def _interpret_metrics(metrics: Dict[str, Any]) -> Dict[str, str]:
     return interpretations
 
 
-# --- REPLACE the old function with this new, smarter version ---
-def format_metrics_to_question(metrics: Dict[str, Any], additional_info: str = None) -> str:
+def format_metrics_to_question(
+        metrics: Dict[str, Any],
+        reported_conditions: Optional[List[str]] = None,
+        reported_habits: Optional[List[str]] = None,
+        additional_info: str = None
+) -> str:
     """
-    Formats health metrics into a rich, interpretive, natural language query for the RAG system.
+    Formats health metrics and user-reported info into a rich, natural language query.
     """
-    # First, get the clinical interpretations of the raw numbers
     interpretations = _interpret_metrics(metrics)
 
-    # Build a narrative query
     query_parts = [
         f"The user is a {metrics.get('age')}-year-old {metrics.get('gender', 'person').lower()}."
     ]
@@ -215,23 +211,30 @@ def format_metrics_to_question(metrics: Dict[str, Any], additional_info: str = N
     lab_results = []
     if ldl_status := interpretations.get('ldl_status'):
         lab_results.append(f"LDL cholesterol is {ldl_status} at {metrics.get('ldl')} mg/dL")
-
     if hdl_status := interpretations.get('hdl_status'):
         lab_results.append(f"HDL cholesterol is {hdl_status} at {metrics.get('hdl')} mg/dL")
-
     if tg_status := interpretations.get('tg_status'):
         lab_results.append(f"triglycerides are {tg_status} at {metrics.get('triglycerides')} mg/dL")
-
     if fbs_status := interpretations.get('fbs_status'):
         lab_results.append(f"fasting blood sugar is {fbs_status} at {metrics.get('fasting_blood_sugar')} mg/dL")
 
     if lab_results:
         query_parts.append(f"Key lab results indicate: {', '.join(lab_results)}.")
 
+    # --- START: THE FIX ---
+    # Add logic to include the new user-reported information
+    if reported_conditions:
+        conditions_str = ', '.join(reported_conditions)
+        query_parts.append(f"The user also reports the following health conditions: {conditions_str}.")
+
+    if reported_habits:
+        habits_str = ', '.join(reported_habits)
+        query_parts.append(f"Regarding lifestyle, the user mentions: {habits_str}.")
+    # --- END: THE FIX ---
+
     if additional_info:
         query_parts.append(f"Additional user information: {additional_info}")
 
-    # The final query is now a descriptive paragraph
     return " ".join(query_parts)
 
 
@@ -256,7 +259,6 @@ class RAGService:
         self.retriever = MultiQueryRetriever.from_llm(retriever=base_retriever, llm=self.llm)
         self.embedding_model = embedding_model
 
-        # --- UPDATE: Use the new wrapper models for list-based tasks ---
         self.overview_chain = self._create_chain(prompts.OVERVIEW_PROMPT_TEMPLATE, HealthOverview)
         self.priorities_chain = self._create_chain(prompts.PRIORITIES_PROMPT_TEMPLATE, TopPriorities)  # Changed
         self.nutrition_chain = self._create_chain(prompts.NUTRITION_PROMPT_TEMPLATE, NutritionPlan)
@@ -267,16 +269,29 @@ class RAGService:
         self._initialized = True
         print("RAG Orchestration Service initialized successfully!")
 
-    # --- SIMPLIFIED HELPER FUNCTION ---
     def _create_chain(self, prompt_template: str, pydantic_object: Any) -> Runnable:
-        """Helper to create a LangChain runnable for a specific Pydantic model."""
-        parser = PydanticOutputParser(pydantic_object=pydantic_object)
+        """
+        Helper to create a LangChain runnable that includes a self-correcting parser.
+        """
+        # 1. Define the primary parser that enforces our desired Pydantic schema.
+        pydantic_parser = PydanticOutputParser(pydantic_object=pydantic_object)
+
+        # 2. Create the self-correcting parser, which wraps the primary parser.
+        # It uses the same LLM to automatically fix any syntax errors.
+        auto_fixing_parser = OutputFixingParser.from_llm(
+            parser=pydantic_parser,
+            llm=self.llm
+        )
+
         prompt = PromptTemplate(
             template=prompt_template,
             input_variables=["question", "documents"],
-            partial_variables={"format_instructions": parser.get_format_instructions()},
+            # The initial prompt uses the primary parser's instructions.
+            partial_variables={"format_instructions": pydantic_parser.get_format_instructions()},
         )
-        return prompt | self.llm | parser
+
+        # 3. The final chain uses the auto_fixing_parser at the end.
+        return prompt | self.llm | auto_fixing_parser
 
     async def _generate_task(
             self, chain: Runnable, question: str, metadata_filter: Optional[Dict] = None
@@ -287,36 +302,42 @@ class RAGService:
         try:
             print(f"Retrieving documents for task with query: '{question[:50]}...'")
 
-            # 1. Perform targeted retrieval for this specific task
             if metadata_filter:
-                # Use the filter if provided (for specialist tasks)
                 retriever = self.vectorstore.as_retriever(
                     search_kwargs={'k': settings.RETRIEVER_K, 'filter': metadata_filter}
                 )
             else:
-                # Use the general retriever (for the overview task)
                 retriever = self.retriever
 
             documents = await retriever.ainvoke(question)
             doc_texts = "\n---\n".join([doc.page_content for doc in documents])
 
-            # 2. Invoke the LLM chain with the tailored documents
             print(f"Generating response for task...")
             return await chain.ainvoke({"question": question, "documents": doc_texts})
         except Exception as e:
             print(f"Error in generating task for chain {chain}: {e}")
             return None
 
-    # --- REWRITTEN: The main orchestration method ---
     async def generate_structured_recommendation(
-            self, metrics: Dict[str, Any], additional_info: str = None
+            self,
+            metrics: Dict[str, Any],
+            reported_conditions: Optional[List[str]],
+            reported_habits: Optional[List[str]],
+            additional_info: str = None
     ) -> StructuredRecommendationResponse:
         """
-        Orchestrates multiple, parallel RAG calls with per-task retrieval to build a recommendation.
+        Orchestrates multiple, parallel RAG calls with per-task retrieval to build a recommendation,
+        now including user-reported lifestyle and health data.
         """
-        initial_question = format_metrics_to_question(metrics, additional_info)
+        # The initial question now becomes hyper-personalized with the new data
+        initial_question = format_metrics_to_question(
+            metrics,
+            reported_conditions,
+            reported_habits,
+            additional_info
+        )
 
-        # Create specialized questions for each agent to guide their retrieval
+        # The specialized questions are automatically enriched because they use the new initial_question
         specialized_questions = {
             "overview": initial_question,
             "priorities": f"Based on the following profile, what are the top 3 health priorities? Profile: {initial_question}",
@@ -326,11 +347,9 @@ class RAGService:
             "risk": f"Provide a final risk assessment and next steps for this profile: {initial_question}"
         }
 
-        # Define the concurrent tasks, each with its own query and metadata filter
+        # The rest of the logic remains exactly the same
         tasks = [
-            # The overview agent gets to see everything
             self._generate_task(self.overview_chain, specialized_questions["overview"]),
-            # Specialist agents get filtered documents
             self._generate_task(self.priorities_chain, specialized_questions["priorities"], {"category": "general"}),
             self._generate_task(self.nutrition_chain, specialized_questions["nutrition"], {"category": "dietary"}),
             self._generate_task(self.meal_plan_chain, specialized_questions["meal_plan"], {"category": "dietary"}),
@@ -340,9 +359,9 @@ class RAGService:
         ]
 
         results = await asyncio.gather(*tasks)
+
         overview_result, priorities_result, nutrition_result, meal_plan_result, lifestyle_result, risk_assessment_result = results
 
-        # Assemble the final response
         final_priorities = priorities_result.priorities if priorities_result else None
         final_lifestyle = lifestyle_result.recommendations if lifestyle_result else None
 
@@ -371,7 +390,6 @@ class RAGService:
         await self.vectorstore.aadd_documents(doc_splits)
         print(f"Successfully indexed {len(doc_splits)} contextual chunks from {pdf_path}")
 
-    # In app/services/rag_service.py within the RAGService class
 
     async def get_recommendation(self, metrics: Dict[str, Any], additional_info: str = None) -> str:
         """Gets a diet recommendation using the RAG chain."""
@@ -379,7 +397,6 @@ class RAGService:
         print(f"Formatted query for RAG: {question}")
 
         try:
-            # Retrieve relevant documents from Pinecone
             documents = await self.retriever.ainvoke(question)
 
             if not documents:
@@ -388,9 +405,7 @@ class RAGService:
 
             doc_texts = "\n---\n".join([doc.page_content for doc in documents])
 
-            # Invoke the RAG chain with the formatted question and retrieved documents
             answer = await self.rag_chain.ainvoke({"question": question, "documents": doc_texts})
-            print("ANswerrrrrrr")
             print(answer)
             return answer
         except Exception as e:
@@ -417,14 +432,11 @@ class RAGService:
         indexed_files_count = 0
         total_chunks_count = 0
 
-        # Walk through the sources directory and its subdirectories
         for root, dirs, files in os.walk(source_directory):
             for filename in files:
                 if filename.lower().endswith(".pdf"):
                     file_path = os.path.join(root, filename)
                     try:
-                        # Re-using the existing add_pdf_to_index logic
-                        # First, load and split to get the chunk count
                         doc_splits = _load_and_split_pdf(
                             file_path,
                             self.embedding_model,
@@ -437,7 +449,6 @@ class RAGService:
 
                         chunk_count = len(doc_splits)
 
-                        # Then, add to the vector store
                         await self.vectorstore.aadd_documents(doc_splits)
 
                         print(f"Successfully indexed {chunk_count} chunks from {file_path}")

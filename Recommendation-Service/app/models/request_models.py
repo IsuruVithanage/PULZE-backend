@@ -25,6 +25,7 @@ class HealthMetrics(BaseModel):
 
     # --- NEW: Blood Sugar Metric (Optional) ---
     fasting_blood_sugar: Optional[float] = Field(None, description="Fasting blood sugar in mg/dL", ge=0)
+    hba1c: Optional[float] = Field(None, description="Glycated hemoglobin as a percentage (%)", ge=0)
 
     @field_validator('gender')
     def gender_must_be_valid(cls, v):
@@ -34,8 +35,6 @@ class HealthMetrics(BaseModel):
         return v
 
 class RecommendationRequest(BaseModel):
-    # ... your existing RecommendationRequest class ...
-    health_metrics: HealthMetrics
     additional_info: Optional[str] = Field(None, description="Any additional health information")
 
 
