@@ -151,13 +151,12 @@ async def trigger_reindexing(rag_service: RAGService = Depends(get_rag_service))
 
 @router.post("/generate-doctor-summary")
 async def generate_doctor_summary(
-        request: schemas.RecommendationRequest,
+        user_id: int = Depends(get_user_id_from_gateway),
         rag_service: RAGService = Depends(get_rag_service)
 ):
-    user_id = request.health_metrics.user_id
 
     user_profile_url = f"http://localhost:8001/api/auth/users/{user_id}/profile"
-    historical_data_url = f"http://localhost:8000/api/users/{user_id}/historical-data"
+    historical_data_url = f"http://localhost:8002/api/users/{user_id}/historical-data"
 
     async with httpx.AsyncClient() as client:
         try:
@@ -223,11 +222,30 @@ async def generate_doctor_summary(
         pdf_generator.create_pdf_from_html(template_context, pdf_path)
 
         s3_key = f"reports/{user_id}/health_summary_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}.pdf"
-        s3_client.upload_file(pdf_path, os.getenv("S3_BUCKET_NAME"), s3_key)
 
-        presigned_pdf_url = s3_client.generate_presigned_url(
-            'get_object', Params={'Bucket': os.getenv("S3_BUCKET_NAME"), 'Key': s3_key}, ExpiresIn=3600
+        s3_client = boto3.client(
+            "s3",
+            region_name=settings.AWS_REGION,
+            config=boto3.session.Config(signature_version='s3v4')
         )
+
+        # --- THIS IS THE ONLY LINE YOU NEED TO CHANGE ---
+        # Add the ExtraArgs parameter to put the correct "sign on the door" during upload.
+        s3_client.upload_file(
+            pdf_path,
+            settings.S3_BUCKET_NAME,
+            s3_key,
+            ExtraArgs={'ContentType': 'application/pdf'}
+        )
+        # ------------------------------------------------
+
+        # Now, your existing simple presigned URL code will work perfectly for this newly uploaded file.
+        presigned_pdf_url = s3_client.generate_presigned_url(
+            'get_object',
+            Params={'Bucket': settings.S3_BUCKET_NAME, 'Key': s3_key},
+            ExpiresIn=3600
+        )
+
 
     except (NoCredentialsError, Exception) as e:
         print(f"Error with S3 or PDF generation: {e}")

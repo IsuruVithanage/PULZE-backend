@@ -5,26 +5,44 @@ from typing import Dict, List, Any
 def get_metric_status(metric_name: str, value: float) -> str:
     """
     Determines the clinical status of a health metric based on its value.
-    Used for creating the deterministic table in the final report.
+    This version handles different types of range checks.
     """
     if value is None:
         return "N/A"
 
+    # Define all possible ranges and types in one place
     ranges = {
-        "Total Cholesterol": {"normal": 199, "borderline": 239},
-        "LDL Cholesterol": {"normal": 99, "borderline": 159},
-        "HDL Cholesterol": {"low": 39},
-        "Fasting Blood Sugar": {"normal": 99, "prediabetes": 125},
+        "Total Cholesterol": {"normal": 199, "borderline": 239, "type": "high"},
+        "LDL Cholesterol": {"normal": 99, "borderline": 159, "type": "high"},
+        "HDL Cholesterol": {"low": 39, "type": "low"},  # HDL is bad when it's low
+        "Fasting Blood Sugar": {"normal": 99, "prediabetes": 125, "type": "high"},
+        # Add other metrics like BMI if needed
+        "BMI": {"normal": 24.9, "overweight": 29.9, "type": "high"}
     }
 
-    if metric_name in ranges:
-        if "low" in ranges[metric_name]:
-            if value <= ranges[metric_name]["low"]: return "Low"
+    metric_range = ranges.get(metric_name)
+
+    if not metric_range:
+        return "N/A"  # No defined range for this metric
+
+    # --- NEW, SAFER LOGIC ---
+    if metric_range["type"] == "high":
+        if value <= metric_range["normal"]:
             return "Normal"
+        # Check if 'borderline' or 'prediabetes' key exists before accessing it
+        elif "borderline" in metric_range and value <= metric_range["borderline"]:
+            return "Borderline High"
+        elif "prediabetes" in metric_range and value <= metric_range["prediabetes"]:
+            return "Prediabetes"
         else:
-            if value <= ranges[metric_name]["normal"]: return "Normal"
-            if value <= ranges[metric_name]["borderline"]: return "Borderline High"
             return "High"
+
+    elif metric_range["type"] == "low":
+        if value <= metric_range["low"]:
+            return "Low (Risk)"
+        else:
+            return "Normal"
+
     return "N/A"
 
 
