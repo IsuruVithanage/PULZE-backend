@@ -1,4 +1,9 @@
-import os
+"""
+Main entry point for the Health Metrics Service.
+
+This script initializes the FastAPI application, loads environment variables,
+and includes the API router for all the service's endpoints.
+"""
 
 from dotenv import load_dotenv
 from fastapi import FastAPI

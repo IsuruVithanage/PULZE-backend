@@ -1,16 +1,25 @@
-# app/schemas.py
+"""
+Defines Pydantic schemas for API data validation and serialization.
+
+These models act as the data contract for the API, ensuring that requests
+and responses conform to a defined structure.
+"""
+
 from typing import List, Optional
 from pydantic import BaseModel
 from datetime import datetime
 from enum import Enum
 
-# --- Enum for Report Type selection in the API ---
+
 class ReportType(str, Enum):
+    """Enum to enforce a specific set of report types in the API."""
     LIPID = "lipid"
     BLOOD_SUGAR = "blood_sugar"
 
+
 # --- Schemas for Lipid Report ---
 class LipidReportBase(BaseModel):
+    """Base schema for lipid report data."""
     total_cholesterol: float
     hdl_cholesterol: float
     triglycerides: float
@@ -20,10 +29,9 @@ class LipidReportBase(BaseModel):
     total_hdl_ratio: Optional[float] = None
     triglycerides_hdl_ratio: Optional[float] = None
 
-class LipidReportCreate(LipidReportBase):
-    pass
 
 class LipidReportResponse(LipidReportBase):
+    """Schema for responding with lipid report data, including database fields."""
     id: int
     user_id: int
     updated_at: datetime
@@ -31,16 +39,17 @@ class LipidReportResponse(LipidReportBase):
     class Config:
         from_attributes = True
 
+
 # --- Schemas for Blood Sugar Report ---
 class BloodSugarReportBase(BaseModel):
+    """Base schema for blood sugar report data."""
     fasting_blood_sugar: Optional[float] = None
     random_blood_sugar: Optional[float] = None
     hba1c: Optional[float] = None
 
-class BloodSugarReportCreate(BloodSugarReportBase):
-    pass
 
 class BloodSugarReportResponse(BloodSugarReportBase):
+    """Schema for responding with blood sugar data, including database fields."""
     id: int
     user_id: int
     updated_at: datetime
@@ -48,21 +57,30 @@ class BloodSugarReportResponse(BloodSugarReportBase):
     class Config:
         from_attributes = True
 
-# --- Schemas for Charting and Metric Updates (can be kept generic) ---
+
+# --- Schemas for Utility Endpoints ---
 class UpdateMetricRequest(BaseModel):
-    report_type: ReportType  # <-- Add this field
+    """Schema for updating a single metric in a report."""
+    report_type: ReportType
     metric_name: str
     metric_value: float
 
+
 class ChartDataset(BaseModel):
+    """Schema for a dataset within a chart response."""
     data: List[Optional[float]]
 
+
 class ChartResponse(BaseModel):
+    """Schema for providing data formatted for charting libraries."""
     labels: List[str]
     datasets: List[ChartDataset]
 
 
 class CombinedReportResponse(BaseModel):
+    """Schema for the combined latest report, including calculated BMI."""
+    bmi: Optional[float] = None
+    weight: Optional[float] = None
     total_cholesterol: Optional[float] = None
     hdl_cholesterol: Optional[float] = None
     triglycerides: Optional[float] = None
@@ -74,15 +92,20 @@ class CombinedReportResponse(BaseModel):
     last_updated: Optional[datetime] = None
 
 
-
+# --- Schemas for Historical Summary ---
 class TimeSeriesDataPoint(BaseModel):
+    """Represents a single data point in a time series (date and value)."""
     date: datetime
     value: Optional[float]
 
+
 class MetricTimeSeries(BaseModel):
+    """Represents a full time series for a single metric."""
     name: str
     unit: str
     series: List[TimeSeriesDataPoint]
 
+
 class HistoricalDataResponse(BaseModel):
+    """Schema for the historical data summary endpoint."""
     metrics: List[MetricTimeSeries]
