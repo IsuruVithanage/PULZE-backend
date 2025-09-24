@@ -1,53 +1,48 @@
+"""
+Contains authentication-related helper functions, such as password hashing
+and JWT creation/validation.
+"""
+
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from fastapi import Depends, HTTPException, status, Request
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
-
 from . import models, database
 
+# --- Configuration ---
 SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_DAYS = 30
 
+# We use bcrypt as the hashing algorithm
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
-def verify_password(plain_password, hashed_password):
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    """Verifies a plain-text password against a hashed password."""
     return pwd_context.verify(plain_password, hashed_password)
 
 
-def get_password_hash(password):
+def get_password_hash(password: str) -> str:
+    """Hashes a plain-text password using bcrypt."""
     return pwd_context.hash(password)
 
 
-def create_access_token(data: dict):
+def create_access_token(data: dict) -> str:
+    """
+    Creates a new JWT access token.
+
+    Args:
+        data (dict): The payload to encode in the token (e.g., user ID).
+
+    Returns:
+        str: The encoded JWT token.
+    """
     to_encode = data.copy()
-    expire = datetime.utcnow() + timedelta(days=ACCESS_TOKEN_EXPIRE_DAYS)
+    # Set the token expiration time
+    expire = datetime.now(timezone.utc) + timedelta(days=ACCESS_TOKEN_EXPIRE_DAYS)
     to_encode.update({"exp": expire})
+    # Encode the token with the secret key and algorithm
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-
-
-# This dependency reads the cookie and validates the JWT
-def get_current_user(request: Request, db: Session = Depends(database.get_db)):
-    token = request.cookies.get("access_token")
-    if not token:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
-
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-    )
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        user_id: str = payload.get("sub")
-        if user_id is None:
-            raise credentials_exception
-    except JWTError:
-        raise credentials_exception
-
-    user = db.query(models.User).filter(models.User.id == int(user_id)).first()
-    if user is None:
-        raise credentials_exception
-    return user
