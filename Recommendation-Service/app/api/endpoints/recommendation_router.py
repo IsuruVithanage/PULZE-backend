@@ -7,14 +7,13 @@ import httpx
 from botocore.exceptions import NoCredentialsError
 from dotenv import load_dotenv
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, Header
-from app.models.request_models import RecommendationRequest, RecommendationResponse, DocumentCategory
+from app.models.request_models import DocumentCategory
 from app.models.response_models import StructuredRecommendationResponse
 from app.services.rag_service import RAGService
 from app.core.config import settings
 from app.utils import pdf_generator
 from app.utils.dependencies import get_user_id_from_gateway
 from app.utils.pdf_loader import save_uploaded_pdf
-from app.models import request_models as schemas
 import os
 import uuid
 
@@ -44,8 +43,10 @@ async def get_diet_recommendation(
     except (ValueError, TypeError):
         raise HTTPException(status_code=400, detail="Invalid X-User-ID header format.")
 
-    user_service_base_url = "http://localhost:8001"
-    metrics_service_base_url = "http://localhost:8002"
+    user_service_base_url = settings.USER_SERVICE_URL
+    metrics_service_base_url = settings.HEALTH_METRICS_SERVICE_URL
+
+    print(user_service_base_url, metrics_service_base_url)
 
     # Define the two required URLs
     profile_url = f"{user_service_base_url}/api/auth/users/{user_id}/profile"
@@ -66,7 +67,6 @@ async def get_diet_recommendation(
             user_profile = profile_res.json()
             latest_report = metrics_res.json()
 
-        # ... (calculate_bmi function remains the same) ...
         def calculate_bmi(weight, height):
             if not weight or not height: return None
             return round(weight / ((height / 100) ** 2), 1)
@@ -154,9 +154,11 @@ async def generate_doctor_summary(
         user_id: int = Depends(get_user_id_from_gateway),
         rag_service: RAGService = Depends(get_rag_service)
 ):
+    user_service_base_url = settings.USER_SERVICE_URL
+    metrics_service_base_url = settings.HEALTH_METRICS_SERVICE_URL
 
-    user_profile_url = f"http://localhost:8001/api/auth/users/{user_id}/profile"
-    historical_data_url = f"http://localhost:8002/api/users/{user_id}/historical-data"
+    user_profile_url = f"{user_service_base_url}/api/auth/users/{user_id}/profile"
+    historical_data_url = f"{metrics_service_base_url}/api/users/{user_id}/historical-data"
 
     async with httpx.AsyncClient() as client:
         try:
@@ -229,17 +231,13 @@ async def generate_doctor_summary(
             config=boto3.session.Config(signature_version='s3v4')
         )
 
-        # --- THIS IS THE ONLY LINE YOU NEED TO CHANGE ---
-        # Add the ExtraArgs parameter to put the correct "sign on the door" during upload.
         s3_client.upload_file(
             pdf_path,
             settings.S3_BUCKET_NAME,
             s3_key,
             ExtraArgs={'ContentType': 'application/pdf'}
         )
-        # ------------------------------------------------
 
-        # Now, your existing simple presigned URL code will work perfectly for this newly uploaded file.
         presigned_pdf_url = s3_client.generate_presigned_url(
             'get_object',
             Params={'Bucket': settings.S3_BUCKET_NAME, 'Key': s3_key},

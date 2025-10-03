@@ -40,8 +40,6 @@ class TopPriorities(BaseModel):
 
 class LifestylePlan(BaseModel):
     recommendations: List[LifestyleRec] = Field(description="A list of lifestyle recommendations.")
-# ---------------------------------------------
-
 
 class RiskAssessment(BaseModel):
     risk_level: str = Field(description="A qualitative assessment of the user's overall health risk (e.g., 'Low', 'Moderate', 'High').")
