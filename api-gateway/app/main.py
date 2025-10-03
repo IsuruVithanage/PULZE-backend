@@ -7,9 +7,6 @@ for the microservices, sets up middleware, and defines global exception handlers
 
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
-import httpx
-from starlette.responses import StreamingResponse
-import os
 from dotenv import load_dotenv
 from .routers import user_service, recommendation_service, health_metrics_service
 
