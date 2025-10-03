@@ -4,6 +4,7 @@ Defines Pydantic schemas for API data validation and serialization.
 These schemas determine the shape of the data for API requests and responses,
 ensuring that data is valid and formatted correctly.
 """
+from datetime import time
 
 from pydantic import BaseModel, EmailStr
 from typing import Optional, List
@@ -79,3 +80,20 @@ class Token(BaseModel):
     """Schema for the JWT access token response."""
     access_token: str
     token_type: str
+
+
+class ReminderBase(BaseModel):
+    medicine_name: str
+    dosage: str
+    reminder_time: time
+    is_active: bool = True
+
+class ReminderCreate(ReminderBase):
+    pass
+
+class Reminder(ReminderBase):
+    id: int
+    user_id: int
+
+    class Config:
+        orm_mode = True

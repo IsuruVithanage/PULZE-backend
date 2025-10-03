@@ -7,7 +7,7 @@ and includes the necessary API routers.
 
 from dotenv import load_dotenv
 from fastapi import FastAPI
-from .routes import auth
+from .routes import auth, reminders
 from . import models
 from .database import engine
 
@@ -21,3 +21,5 @@ app = FastAPI(title="User Authentication Service")
 
 # All routes defined in routes/auth.py will be available under the /api prefix
 app.include_router(auth.router, prefix="/api")
+
+app.include_router(reminders.router, prefix="/api")
