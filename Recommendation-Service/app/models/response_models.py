@@ -1,13 +1,14 @@
 from pydantic import BaseModel, Field
-from typing import List, Optional
+from typing import List, Optional, Union
+
 
 # --- Models for individual LLM call outputs ---
 
 class KeyMetric(BaseModel):
     name: str = Field(description="Name of the health metric, e.g., 'BMI', 'LDL-C'")
-    value: float = Field(description="The user's value for the metric")
-    unit: str = Field(description="The unit of measurement, e.g., 'kg/m²', 'mg/dL'")
-    status: str = Field(description="A qualitative assessment, e.g., 'Normal', 'Good', 'Borderline High'")
+    value: Optional[Union[float, str]] = Field(description="The user's value for the metric")
+    unit: Optional[str] = Field(description="The unit of measurement, e.g., 'kg/m²', 'mg/dL'")
+    status: Optional[str] = Field(description="A qualitative assessment, e.g., 'Normal', 'Good', 'Borderline High'")
 
 class FoodRec(BaseModel):
     group: str = Field(description="The food group or item, e.g., 'Whole-grain red rice'")

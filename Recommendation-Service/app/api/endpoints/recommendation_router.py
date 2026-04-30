@@ -9,8 +9,8 @@ from dotenv import load_dotenv
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, Header
 from app.models.request_models import DocumentCategory
 from app.models.response_models import StructuredRecommendationResponse
-from app.services.rag_service import RAGService
 from app.core.config import settings
+from app.services.rag.service import RAGService
 from app.utils import pdf_generator
 from app.utils.dependencies import get_user_id_from_gateway
 from app.utils.pdf_loader import save_uploaded_pdf

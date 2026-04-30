@@ -1,33 +1,54 @@
+# --- Core API & Server ---
 fastapi>=0.110.0
 uvicorn>=0.29.0
 python-dotenv>=1.0.0
-langchain>=0.2.0
-langchain-community>=0.2.0
-langchain-core>=0.2.0
-langchain-text-splitters>=0.2.0
-langchain-ollama>=0.2.0
-faiss-cpu>=1.8.0
-pydantic-settings>=2.0.0
-httpx>=0.23.0
 python-multipart>=0.0.5
+httpx>=0.23.0
 loguru>=0.7.0
+
+# --- AI & LangChain Ecosystem (0.3.x) ---
+langchain>=0.3.0
+langchain-community>=0.3.0
+langchain-core>=0.3.0
+langchain-text-splitters>=0.3.0
+langchain-groq>=0.2.0
+langchain-ollama>=0.2.0
+langgraph>=0.2.0
+langchain-huggingface>=0.2.0
+
+# --- Vector Store & Embeddings ---
+pinecone~=7.3.0
+faiss-cpu>=1.8.0
+langchain-pinecone>=0.2.0
+langchain-huggingface>=0.2.0
+sentence-transformers>=3.0.0
+
+# --- Data Validation & Typing ---
+pydantic~=2.10.6
+pydantic-settings>=2.0.0
+typing_extensions>=4.12.2
+attrs~=25.3.0
+
+# --- AWS Infrastructure ---
 boto3~=1.40.24
 botocore~=1.40.24
-pinecone~=7.3.0
-Jinja2~=3.1.6
-pydantic~=2.10.6
-pip~=23.2.1
-attrs~=25.3.0
-distro~=1.9.0
-wheel~=0.41.2
-pillow~=11.1.0
-setuptools~=68.2.0
-packaging~=24.2
-typing_extensions~=4.12.2
+
+# --- PDF Generation & Templating ---
 xhtml2pdf~=0.2.17
-cryptography~=45.0.7
+Jinja2~=3.1.6
+pillow~=11.1.0
+
+# --- Data Science & Analytics ---
+scikit-learn~=1.6.1
+numpy~=2.2.4
 matplotlib~=3.10.6
 nltk~=3.9.1
-numpy~=2.2.4
-scikit-learn~=1.6.1
+
+# --- System & Build Utilities ---
+pip>=24.0
+setuptools~=68.2.0
+wheel~=0.41.2
+packaging~=24.2
+distro~=1.9.0
+cryptography~=45.0.7
 pyparsing~=3.2.3
